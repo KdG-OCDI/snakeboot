@@ -3,9 +3,18 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.1,<0.2`.
 
+## 0.1.1
+
+First release on PyPI. The library is the same as 0.1.0; only the release pipeline changed.
+
+- Release pipeline: the smoke test downloads from TestPyPI with pip on Python 3.13 (on an older Python,
+  pip skips snakeboot because of `Requires-Python >= 3.13`); publishing skips files already on the index,
+  so a release can be re-run. GitHub Actions updated (checkout v7, setup-uv v10, upload-artifact v7,
+  download-artifact v8).
+
 ## 0.1.0
 
-First release.
+Published on TestPyPI only: its release stopped at the smoke test, before PyPI.
 
 - `snakeboot.transaction`: `@transactional` (refuses `async def`), `after_commit` (robust), `TransactionManager`,
   `TransactionManagerRegistry`.

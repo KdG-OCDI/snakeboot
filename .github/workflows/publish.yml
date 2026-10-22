@@ -27,9 +27,9 @@ jobs:
     outputs:
       version: ${{ steps.version.outputs.version }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
       - name: The tag must match the version in pyproject.toml
         id: version
@@ -44,7 +44,7 @@ jobs:
       - name: Build wheel and sdist
         run: uv build
 
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
         with:
           name: dist
           path: dist/
@@ -60,15 +60,19 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
+      # --check-url skips files already on the index, so a re-run does not fail on them.
       - name: Publish (trusted publishing)
-        run: uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/
+        run: >-
+          uv publish --trusted-publishing always
+          --publish-url https://test.pypi.org/legacy/
+          --check-url https://test.pypi.org/simple/
 
   smoke-test:
     name: Install and import from TestPyPI
@@ -77,18 +81,20 @@ jobs:
     env:
       VERSION: ${{ needs.build.outputs.version }}
     steps:
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
       # Only snakeboot itself comes from TestPyPI: anyone can register names such as
       # "wireup" there, so its dependencies come from the real PyPI.
+      # pip runs on Python 3.13: on the runner's default Python, pip would skip snakeboot
+      # because of its Requires-Python >= 3.13 and report that no version exists.
       - name: Download snakeboot from TestPyPI (it may take a minute to appear)
         run: |
           for attempt in 1 2 3 4 5 6; do
-            if uv tool run --from pip pip download --no-deps --only-binary :all: \
+            if uv tool run --python 3.13 --from pip pip download --no-deps --only-binary :all: \
                 --index-url https://test.pypi.org/simple/ "snakeboot==${VERSION}" --dest smoke/; then
               exit 0
             fi
-            echo "Not on TestPyPI yet (attempt ${attempt}); waiting."
+            echo "Could not download snakeboot ${VERSION} from TestPyPI (attempt ${attempt}); see above. Waiting."
             sleep 30
           done
           exit 1
@@ -120,12 +126,12 @@ jobs:
     permissions:
       id-token: write
     steps:
-      - uses: actions/download-artifact@v4
+      - uses: actions/download-artifact@v8
         with:
           name: dist
           path: dist/
 
-      - uses: astral-sh/setup-uv@v6
+      - uses: astral-sh/setup-uv@v10
 
       - name: Publish (trusted publishing)
-        run: uv publish --trusted-publishing always
+        run: uv publish --trusted-publishing always --check-url https://pypi.org/simple/
