@@ -1,0 +1,131 @@
+# Publishes snakeboot when a version tag is pushed: `git tag v0.1.0 && git push origin v0.1.0`.
+#
+# No API token exists anywhere: PyPI and TestPyPI trust this workflow through trusted publishing
+# (OpenID Connect). Configure on pypi.org and test.pypi.org, under "Publishing":
+#   owner KdG-OCDI, repository snakeboot, workflow publish.yml,
+#   environment "pypi" (on pypi.org) and "testpypi" (on test.pypi.org).
+#
+# The order makes sure a mistake never reaches the real PyPI:
+#   checks -> build -> TestPyPI -> install and import from TestPyPI -> PyPI.
+name: Publish
+
+on:
+  push:
+    tags: ["v*"]
+
+permissions:
+  contents: read
+
+jobs:
+  checks:
+    uses: ./.github/workflows/ci.yml
+
+  build:
+    name: Build
+    needs: checks
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.version.outputs.version }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: The tag must match the version in pyproject.toml
+        id: version
+        run: |
+          version="$(uv version --short)"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "Tag ${GITHUB_REF_NAME} does not match version ${version} in pyproject.toml." >&2
+            exit 1
+          fi
+          echo "version=${version}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build wheel and sdist
+        run: uv build
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: dist
+          path: dist/
+          if-no-files-found: error
+
+  testpypi:
+    name: Publish to TestPyPI
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: testpypi
+      url: https://test.pypi.org/project/snakeboot/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Publish (trusted publishing)
+        run: uv publish --trusted-publishing always --publish-url https://test.pypi.org/legacy/
+
+  smoke-test:
+    name: Install and import from TestPyPI
+    needs: [build, testpypi]
+    runs-on: ubuntu-latest
+    env:
+      VERSION: ${{ needs.build.outputs.version }}
+    steps:
+      - uses: astral-sh/setup-uv@v6
+
+      # Only snakeboot itself comes from TestPyPI: anyone can register names such as
+      # "wireup" there, so its dependencies come from the real PyPI.
+      - name: Download snakeboot from TestPyPI (it may take a minute to appear)
+        run: |
+          for attempt in 1 2 3 4 5 6; do
+            if uv tool run --from pip pip download --no-deps --only-binary :all: \
+                --index-url https://test.pypi.org/simple/ "snakeboot==${VERSION}" --dest smoke/; then
+              exit 0
+            fi
+            echo "Not on TestPyPI yet (attempt ${attempt}); waiting."
+            sleep 30
+          done
+          exit 1
+
+      - name: Import every package
+        run: |
+          uv run --no-project --python 3.13 --with "$(ls smoke/snakeboot-*.whl)[django,ninja]" python -c "
+          import django
+          from django.conf import settings
+          settings.configure()
+          django.setup()
+          import snakeboot.component_scan, snakeboot.django, snakeboot.events
+          import snakeboot.rest, snakeboot.testing, snakeboot.transaction
+          from snakeboot.component_scan import SNAKEBOOT_AUTO_CONFIGURATION
+          import importlib
+          for module in SNAKEBOOT_AUTO_CONFIGURATION:
+              importlib.import_module(module)
+          print('snakeboot', '${VERSION}', 'imports cleanly')
+          "
+
+  pypi:
+    name: Publish to PyPI
+    needs: [build, smoke-test]
+    runs-on: ubuntu-latest
+    # Add "required reviewers" to this environment on GitHub to approve each release by hand.
+    environment:
+      name: pypi
+      url: https://pypi.org/project/snakeboot/${{ needs.build.outputs.version }}/
+    permissions:
+      id-token: write
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: dist
+          path: dist/
+
+      - uses: astral-sh/setup-uv@v6
+
+      - name: Publish (trusted publishing)
+        run: uv publish --trusted-publishing always

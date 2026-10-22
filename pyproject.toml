@@ -1,0 +1,194 @@
+[project]
+name = "snakeboot"
+version = "0.1.0"
+description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan and singleton REST controllers on Django Ninja, wired by wireup."
+readme = "README.md"
+license = "MIT"
+license-files = ["LICENSE"]
+authors = [
+    { name = "Wouter Deketelaere", email = "wouter.deketelaere@kdg.be" }
+]
+requires-python = ">=3.13"
+dependencies = [
+    "wireup>=2.12.0",
+]
+keywords = ["spring-boot", "hexagonal-architecture", "ddd", "django", "django-ninja", "wireup", "dependency-injection", "transactional"]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Framework :: Django",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Education",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3 :: Only",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
+    "Topic :: Software Development :: Libraries :: Application Frameworks",
+    "Typing :: Typed",
+]
+
+[project.urls]
+Homepage = "https://github.com/KdG-OCDI/snakeboot"
+Repository = "https://github.com/KdG-OCDI/snakeboot"
+Issues = "https://github.com/KdG-OCDI/snakeboot/issues"
+Changelog = "https://github.com/KdG-OCDI/snakeboot/blob/main/CHANGELOG.md"
+
+[project.optional-dependencies]
+# DjangoAtomicTransactionManager (snakeboot.django).
+django = ["django>=6.1.1"]
+# Singleton REST controllers and advices on Django Ninja (snakeboot.rest).
+ninja = ["django>=6.1.1", "django-ninja>=1.7.1"]
+
+[build-system]
+requires = ["uv_build>=0.12.19,<0.13.0"]
+build-backend = "uv_build"
+
+[dependency-groups]
+dev = [
+    "django>=6.1.1",
+    "django-ninja>=1.7.1",
+    "django-stubs>=6.1.2",
+    "import-linter>=2.15",
+    "mypy>=2.4.0",
+    "pre-commit>=4.7.0",
+    "pytest>=9.1.1",
+    "pytest-django>=4.14.0",
+    "ruff>=0.17.1",
+]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-ra --strict-markers"
+DJANGO_SETTINGS_MODULE = "tests.django_settings"
+# The tests are a package of their own (tests.django_settings, tests.rest.sample_controllers).
+pythonpath = ["."]
+django_find_project = false
+
+# ---------------------------------------------------------------------------
+# Architecture contracts (run with `uv run lint-imports`, also part of pytest).
+# Each library stays as small as its purpose: the core knows no framework.
+# ---------------------------------------------------------------------------
+[tool.importlinter]
+root_package = "snakeboot"
+include_external_packages = true
+
+[[tool.importlinter.contracts]]
+name = "transaction knows no framework and no other part of snakeboot"
+type = "forbidden"
+source_modules = ["snakeboot.transaction"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "wireup",
+    "snakeboot.component_scan",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "component_scan is standard library only, so settings can use it before Django starts"
+type = "forbidden"
+source_modules = ["snakeboot.component_scan"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "wireup",
+    "snakeboot.transaction",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "events knows wireup and transaction, but no web or ORM framework"
+type = "forbidden"
+source_modules = ["snakeboot.events"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "pydantic",
+    "snakeboot.component_scan",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "rest knows Ninja and wireup, but not the transaction and event libraries"
+type = "forbidden"
+source_modules = ["snakeboot.rest"]
+forbidden_modules = [
+    "snakeboot.transaction",
+    "snakeboot.events",
+    "snakeboot.component_scan",
+    "snakeboot.django",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "django adapts transaction to Django, nothing else"
+type = "forbidden"
+source_modules = ["snakeboot.django"]
+forbidden_modules = [
+    "ninja",
+    "wireup",
+    "snakeboot.component_scan",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "testing helpers run without a framework"
+type = "forbidden"
+source_modules = ["snakeboot.testing"]
+forbidden_modules = ["django", "ninja", "wireup", "snakeboot.rest", "snakeboot.events", "snakeboot.django"]
+
+# ---------------------------------------------------------------------------
+# Code contracts: the Clean Code rules in AGENTS.md, enforced by Ruff and mypy.
+# ---------------------------------------------------------------------------
+[tool.ruff]
+line-length = 120
+target-version = "py313"
+src = ["src", "tests"]
+
+[tool.ruff.lint]
+select = [
+    "E", "W", "F", "I", "N", "UP", "B", "A",
+    "C4", "SIM", "RET", "PIE", "PERF",
+    "C90", "PL", "FBT", "ARG", "ERA", "T20", "BLE", "DJ", "PT",
+    "D101", "D102", "D103", "D106",
+    "RUF",
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 8
+
+[tool.ruff.lint.pylint]
+max-args = 5
+max-positional-args = 3
+max-branches = 8
+max-returns = 4
+max-statements = 25
+
+[tool.ruff.lint.pydocstyle]
+ignore-decorators = ["typing.override"]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "PLR2004", "PLR0913", "PLR0917", "ARG", "FBT"]
+"**/models.py" = ["D106", "RUF012"]
+
+[tool.mypy]
+python_version = "3.13"
+strict = true
+files = ["src", "tests"]
+mypy_path = "src"
+explicit_package_bases = true
+enable_error_code = ["explicit-override", "ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
+plugins = ["mypy_django_plugin.main"]
+
+[tool.django-stubs]
+django_settings_module = "tests.django_settings"

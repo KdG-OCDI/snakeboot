@@ -1,0 +1,33 @@
+# The gatekeeper: code that breaks ARCHITECTURE_CONTRACT.md or CODE_CONTRACT.md cannot be committed.
+# Activate once per clone with `uv run pre-commit install`.
+#
+# Every hook runs through `uv run`, so it uses exactly the versions pinned in uv.lock:
+# the same Ruff and mypy in the terminal, the editor and the hook.
+repos:
+  - repo: local
+    hooks:
+      - id: ruff-format
+        name: ruff format
+        entry: uv run ruff format
+        language: system
+        types: [python]
+
+      - id: ruff-check
+        name: ruff check
+        entry: uv run ruff check --fix --exit-non-zero-on-fix
+        language: system
+        types: [python]
+
+      - id: mypy
+        name: mypy (strict)
+        entry: uv run mypy
+        language: system
+        types: [python]
+        pass_filenames: false
+
+      - id: pytest
+        name: pytest (with architecture tests)
+        entry: uv run pytest -q
+        language: system
+        types: [python]
+        pass_filenames: false
