@@ -1,6 +1,6 @@
 [project]
 name = "snakeboot"
-version = "0.1.1"
+version = "0.1.2"
 description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan and singleton REST controllers on Django Ninja, wired by wireup."
 readme = "README.md"
 license = "MIT"

@@ -3,9 +3,16 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.1,<0.2`.
 
-## 0.1.1
+## 0.1.2
 
 First release on PyPI. The library is the same as 0.1.0; only the release pipeline changed.
+
+- Release pipeline: `astral-sh/setup-uv` is pinned to its full version (`v10.3.2`); since v8 it publishes
+  no major-version tags such as `v10`, so the 0.1.1 release could not start.
+
+## 0.1.1
+
+Never published: its release could not resolve `astral-sh/setup-uv@v10`.
 
 - Release pipeline: the smoke test downloads from TestPyPI with pip on Python 3.13 (on an older Python,
   pip skips snakeboot because of `Requires-Python >= 3.13`); publishing skips files already on the index,
