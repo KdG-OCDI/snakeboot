@@ -1,7 +1,15 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.2,<0.3`.
+a minor release may break the API: pin `snakeboot>=0.3,<0.4`.
+
+## 0.3.0
+
+- `snakeboot.configuration`: `Section`, the base class of every configuration model (frozen, unknown keys refused),
+  so a model no longer repeats `model_config`; the error for a model that is not a `Section` says so.
+- `DatabaseProperties` (`[database]`, a PostgreSQL database, `as_django_database()`) and `CacheProperties`
+  (`[cache]`, Redis, `as_django_cache()`) next to `DjangoProperties`: the sections Django itself needs, so that
+  an application declares only the sections of its own contexts.
 
 ## 0.2.0
 

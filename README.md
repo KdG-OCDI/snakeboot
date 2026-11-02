@@ -13,7 +13,8 @@ classes you can read in an afternoon, and none of them knows anything about your
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
 | `@rest_controller`, `@route.get`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
-| `@configuration_properties`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@EnableConfigurationProperties`, profiles | `snakeboot[configuration]` |
+| `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@EnableConfigurationProperties`, profiles | `snakeboot[configuration]` |
+| `DjangoProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
 
 The transaction, component scan and testing packages import nothing but the standard library,
@@ -41,22 +42,23 @@ class MyApplication: ...
 WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names()], auto_inject_views=False)
 ```
 
-**Typed configuration.** A Pydantic model is bound to one table of `application.toml`, like
-`@ConfigurationProperties`. Settings lists the sections once, like `@EnableConfigurationProperties`;
-every section then reaches wireup by its type.
+**Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys) is bound to one
+table of `application.toml`, like `@ConfigurationProperties`. Settings lists the sections once, like
+`@EnableConfigurationProperties`; every section then reaches wireup by its type. The sections Django itself
+needs come with snakeboot: `DjangoProperties` (`[django]`), `DatabaseProperties` (`[database]`, PostgreSQL) and
+`CacheProperties` (`[cache]`, Redis).
 
 ```python
 @configuration_properties("chatbot")
-class ChatbotProperties(BaseModel):
-    model_config = ConfigDict(extra="forbid", frozen=True)
-
+class ChatbotProperties(Section):
     model: str  # no default: the value is in application.toml
-    llm: LanguageModelProperties  # a nested model is the table [chatbot.llm]
+    llm: LanguageModelProperties  # a nested Section is the table [chatbot.llm]
 
 
 # settings.py
-CONFIGURATION = load_configuration(DjangoProperties, ChatbotProperties, package="myapp")
+CONFIGURATION = load_configuration(DjangoProperties, DatabaseProperties, ChatbotProperties, package="myapp")
 SECRET_KEY = CONFIGURATION.get(DjangoProperties).secret_key.get_secret_value()
+DATABASES = {"default": CONFIGURATION.get(DatabaseProperties).as_django_database()}
 WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names(), *CONFIGURATION.injectables()])
 ```
 

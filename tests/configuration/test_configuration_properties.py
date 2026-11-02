@@ -104,7 +104,7 @@ def test_a_model_that_ignores_unknown_keys_is_refused() -> None:
 
         text: str
 
-    with pytest.raises(InvalidConfigurationPropertiesError, match="LenientGreeting must declare"):
+    with pytest.raises(InvalidConfigurationPropertiesError, match="LenientGreeting must extend Section"):
         load_configuration(LenientGreeting, package=SAMPLE)
 
 
@@ -115,7 +115,7 @@ def test_a_mutable_model_is_refused() -> None:
 
         text: str
 
-    with pytest.raises(InvalidConfigurationPropertiesError, match="MutableGreeting must declare"):
+    with pytest.raises(InvalidConfigurationPropertiesError, match="MutableGreeting must extend Section"):
         load_configuration(MutableGreeting, package=SAMPLE)
 
 
@@ -129,5 +129,5 @@ def test_an_open_model_inside_a_union_is_refused() -> None:
 
         channel: Closed | OpenChannel
 
-    with pytest.raises(InvalidConfigurationPropertiesError, match="OpenChannel must declare"):
+    with pytest.raises(InvalidConfigurationPropertiesError, match="OpenChannel must extend Section"):
         load_configuration(GreetingWithOpenChannel, package=SAMPLE)

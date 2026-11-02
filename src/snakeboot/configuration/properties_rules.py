@@ -42,8 +42,8 @@ def _models_named_by(annotation: object) -> Iterator[type[BaseModel]]:
 def _refuse_open_model(model: type[BaseModel]) -> None:
     if model.model_config.get("extra") != "forbid" or model.model_config.get("frozen") is not True:
         raise InvalidConfigurationPropertiesError(
-            f'{model.__name__} must declare model_config = ConfigDict(extra="forbid", frozen=True): an unknown '
-            "key is a typo that must stop the start, and the configuration does not change while running."
+            f"{model.__name__} must extend Section (extra='forbid', frozen=True): an unknown key is a typo that "
+            "must stop the start, and the configuration does not change while running."
         )
 
 
