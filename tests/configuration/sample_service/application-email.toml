@@ -1,0 +1,3 @@
+[greeting.channel]
+kind = "email"
+server = "smtp.greeting.example"

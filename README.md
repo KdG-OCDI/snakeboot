@@ -13,6 +13,7 @@ classes you can read in an afternoon, and none of them knows anything about your
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
 | `@rest_controller`, `@route.get`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
+| `@configuration_properties`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@EnableConfigurationProperties`, profiles | `snakeboot[configuration]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
 
 The transaction, component scan and testing packages import nothing but the standard library,
@@ -21,7 +22,7 @@ so the application layer of a hexagonal application can use `@transactional` wit
 ## Install
 
 ```bash
-uv add "snakeboot[django,ninja]"
+uv add "snakeboot[configuration,django,ninja]"
 ```
 
 ## A tour
@@ -39,6 +40,38 @@ class MyApplication: ...
 # settings.py: the setting wireup needs anyway
 WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names()], auto_inject_views=False)
 ```
+
+**Typed configuration.** A Pydantic model is bound to one table of `application.toml`, like
+`@ConfigurationProperties`. Settings lists the sections once, like `@EnableConfigurationProperties`;
+every section then reaches wireup by its type.
+
+```python
+@configuration_properties("chatbot")
+class ChatbotProperties(BaseModel):
+    model_config = ConfigDict(extra="forbid", frozen=True)
+
+    model: str  # no default: the value is in application.toml
+    llm: LanguageModelProperties  # a nested model is the table [chatbot.llm]
+
+
+# settings.py
+CONFIGURATION = load_configuration(DjangoProperties, ChatbotProperties, package="myapp")
+SECRET_KEY = CONFIGURATION.get(DjangoProperties).secret_key.get_secret_value()
+WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names(), *CONFIGURATION.injectables()])
+```
+
+The values come from three places, a later one overriding an earlier one key by key:
+
+| Source | Holds | Spring Boot |
+|---|---|---|
+| `application.toml` in the package | every value the application runs with in production | `application.yml` |
+| `application-<profile>.toml`, when `SNAKEBOOT_PROFILE` names one | what differs on a developer machine, say | `application-local.yml`, `SPRING_PROFILES_ACTIVE` |
+| environment variables `SECTION__KEY__SUBKEY` | secrets and addresses of one deployment | relaxed binding |
+
+Nothing else is read: no `.env` file, no default in code, no command line. The start stops when a model has
+a default, ignores unknown keys or is mutable; when a file or a value is missing; when a key or a table is
+unknown (a typo in `application.toml` or in `CHATBOT__LLM__MODLE`). Tables are merged, not replaced, so put the
+variant without keys of its own in `application.toml` when a profile or the environment may choose another.
 
 **Transactions.** A use case declares its boundary; composition chooses the technology.
 
@@ -96,8 +129,8 @@ mounted = RestControllerMounter().mount(api, scan=settings.WIREUP.injectables or
 
 ## Design rules
 
-* Imitate the basics, not all of Spring: no AOP, no profiles, no scheduling, no message brokers.
-* Fail at start-up, not at the first request: a broken controller, listener or root stops the application.
+* Imitate the basics, not all of Spring: no AOP, no scheduling, no message brokers.
+* Fail at start-up, not at the first request: a broken controller, listener, root or configuration stops the application.
 * Each package knows as little as possible; `uv run lint-imports` enforces it.
 
 ## Develop

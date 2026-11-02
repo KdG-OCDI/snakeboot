@@ -1,7 +1,7 @@
 [project]
 name = "snakeboot"
-version = "0.1.2"
-description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan and singleton REST controllers on Django Ninja, wired by wireup."
+version = "0.2.0"
+description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan, typed configuration with profiles and singleton REST controllers on Django Ninja, wired by wireup."
 readme = "README.md"
 license = "MIT"
 license-files = ["LICENSE"]
@@ -38,6 +38,8 @@ Changelog = "https://github.com/KdG-OCDI/snakeboot/blob/main/CHANGELOG.md"
 django = ["django>=6.1.1"]
 # Singleton REST controllers and advices on Django Ninja (snakeboot.rest).
 ninja = ["django>=6.1.1", "django-ninja>=1.7.1"]
+# Typed configuration from application.toml, one profile and the environment (snakeboot.configuration).
+configuration = ["pydantic-settings>=2.16.0,<3"]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
@@ -51,6 +53,7 @@ dev = [
     "import-linter>=2.15",
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
+    "pydantic-settings>=2.16.0,<3",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
     "ruff>=0.17.1",
@@ -80,6 +83,9 @@ forbidden_modules = [
     "django",
     "ninja",
     "wireup",
+    "pydantic",
+    "pydantic_settings",
+    "snakeboot.configuration",
     "snakeboot.component_scan",
     "snakeboot.events",
     "snakeboot.rest",
@@ -95,6 +101,9 @@ forbidden_modules = [
     "django",
     "ninja",
     "wireup",
+    "pydantic",
+    "pydantic_settings",
+    "snakeboot.configuration",
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.rest",
@@ -110,6 +119,7 @@ forbidden_modules = [
     "django",
     "ninja",
     "pydantic",
+    "snakeboot.configuration",
     "snakeboot.component_scan",
     "snakeboot.rest",
     "snakeboot.django",
@@ -121,6 +131,7 @@ name = "rest knows Ninja and wireup, but not the transaction and event libraries
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [
+    "snakeboot.configuration",
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.component_scan",
@@ -135,6 +146,7 @@ source_modules = ["snakeboot.django"]
 forbidden_modules = [
     "ninja",
     "wireup",
+    "snakeboot.configuration",
     "snakeboot.component_scan",
     "snakeboot.events",
     "snakeboot.rest",
@@ -145,7 +157,32 @@ forbidden_modules = [
 name = "testing helpers run without a framework"
 type = "forbidden"
 source_modules = ["snakeboot.testing"]
-forbidden_modules = ["django", "ninja", "wireup", "snakeboot.rest", "snakeboot.events", "snakeboot.django"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "wireup",
+    "pydantic",
+    "pydantic_settings",
+    "snakeboot.configuration",
+    "snakeboot.rest",
+    "snakeboot.events",
+    "snakeboot.django",
+]
+
+[[tool.importlinter.contracts]]
+name = "configuration knows Pydantic Settings and wireup, but no web or ORM framework and no other part of snakeboot"
+type = "forbidden"
+source_modules = ["snakeboot.configuration"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "snakeboot.transaction",
+    "snakeboot.component_scan",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.testing",
+]
 
 # ---------------------------------------------------------------------------
 # Code contracts: the Clean Code rules in AGENTS.md, enforced by Ruff and mypy.

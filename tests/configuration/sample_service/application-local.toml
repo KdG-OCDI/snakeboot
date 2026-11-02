@@ -1,0 +1,5 @@
+[django]
+debug = true
+
+[greeting.sender]
+address = "dev@localhost"

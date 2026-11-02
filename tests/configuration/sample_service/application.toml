@@ -1,0 +1,16 @@
+[django]
+secret_key = "test-only-secret"
+debug = false
+allowed_hosts = ["greeting.example"]
+log_level = "INFO"
+
+[greeting]
+text = "Hello"
+repeat = 1
+
+[greeting.sender]
+name = "snakeboot"
+address = "noreply@greeting.example"
+
+[greeting.channel]
+kind = "log"

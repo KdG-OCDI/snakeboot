@@ -101,13 +101,13 @@ jobs:
 
       - name: Import every package
         run: |
-          uv run --no-project --python 3.13 --with "$(ls smoke/snakeboot-*.whl)[django,ninja]" python -c "
+          uv run --no-project --python 3.13 --with "$(ls smoke/snakeboot-*.whl)[configuration,django,ninja]" python -c "
           import django
           from django.conf import settings
           settings.configure()
           django.setup()
           import snakeboot.component_scan, snakeboot.django, snakeboot.events
-          import snakeboot.rest, snakeboot.testing, snakeboot.transaction
+          import snakeboot.configuration, snakeboot.rest, snakeboot.testing, snakeboot.transaction
           from snakeboot.component_scan import SNAKEBOOT_AUTO_CONFIGURATION
           import importlib
           for module in SNAKEBOOT_AUTO_CONFIGURATION:

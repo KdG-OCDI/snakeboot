@@ -1,7 +1,17 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.1,<0.2`.
+a minor release may break the API: pin `snakeboot>=0.2,<0.3`.
+
+## 0.2.0
+
+- Add `snakeboot.configuration` (extra `configuration`, Pydantic Settings): `@configuration_properties`
+  binds a Pydantic model to a table of `application.toml`; `load_configuration` reads that file, the
+  profile named by `SNAKEBOOT_PROFILE` (`application-<profile>.toml`) and environment variables
+  `SECTION__KEY__SUBKEY`, and nothing else; `Configuration.injectables()` hands every section to wireup
+  by its type. `DjangoProperties` is the section `[django]`.
+- The start stops on a default in code, a model that ignores unknown keys or is mutable, an unknown key
+  or table, a missing file and a missing or invalid value.
 
 ## 0.1.2
 
