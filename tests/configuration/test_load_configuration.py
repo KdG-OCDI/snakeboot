@@ -152,7 +152,6 @@ def test_no_sections_is_a_valid_configuration() -> None:
     configuration = load_configuration(package="tests.configuration.empty_service")
 
     assert dict(configuration.sections) == {}
-    assert configuration.injectables() == []
 
 
 def test_the_secret_key_never_shows() -> None:

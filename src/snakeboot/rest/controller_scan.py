@@ -1,10 +1,12 @@
+import importlib
 import inspect
-from collections.abc import Iterable, Sequence
+from collections.abc import Sequence
 from dataclasses import dataclass
 from types import ModuleType
 
 from ninja import NinjaAPI, Router
 
+from snakeboot.component_scan import ComponentScan
 from snakeboot.rest.controller_endpoint_factory import ControllerEndpointFactory
 from snakeboot.rest.rest_controller_errors import InvalidRestControllerError
 from snakeboot.rest.rest_controller_mappings import (
@@ -16,51 +18,47 @@ from snakeboot.rest.rest_controller_mappings import (
     DeclaredEndpoint,
     ExceptionHandlerMapping,
 )
-from snakeboot.rest.rest_controller_scanner import RestControllerScanner
 
 
 @dataclass(frozen=True, slots=True)
-class MountedRestComponents:
-    """What RestControllerMounter added to an API: the controllers and the advices it found."""
+class ScannedControllers:
+    """What ControllerScan added to an API: the controllers and the advices it found."""
 
     controllers: list[type]
     advices: list[type]
 
 
-class RestControllerMounter:
-    """Finds the REST controllers and advices under some packages and adds them to a Ninja API.
+class ControllerScan:
+    """Finds the controllers and advices in the modules of the component scan and adds them to a Ninja API.
 
-    Composition calls it once, with the same modules wireup scans for injectables:
-    one "component scan" feeds both dependency injection and routing, so a controller
-    the container knows always has its routes, and the other way round.
+    Like Spring, where the component scan finds every `@RestController` and its request mappings become routes:
+    the scan that fills the container also gives the API its routes, so a controller the container knows always
+    has its routes, and the other way round.
 
-    Like Spring, it refuses to start on an ambiguous mapping: two endpoints for the
-    same HTTP method and path, or two advice methods for the same error type.
+        ControllerScan(settings.COMPONENT_SCAN).add_to(api)
+
+    Like Spring, it refuses to start on an ambiguous mapping: two endpoints for the same HTTP method and path, or
+    two advice methods for the same error type.
     """
 
     def __init__(
-        self,
-        scanner: RestControllerScanner | None = None,
-        endpoint_factory: ControllerEndpointFactory | None = None,
+        self, component_scan: ComponentScan, endpoint_factory: ControllerEndpointFactory | None = None
     ) -> None:
-        self._scanner = scanner or RestControllerScanner()
+        self._component_scan = component_scan
         self._endpoint_factory = endpoint_factory or ControllerEndpointFactory()
 
-    def mount(self, api: NinjaAPI, *, scan: Iterable[str | ModuleType]) -> MountedRestComponents:
-        """Adds one router per controller and the error answers of every advice found under `scan`.
-
-        `scan` takes what `settings.WIREUP.injectables` holds: module names or module objects.
-        """
-        packages = list(scan)
-        controllers = self._scanner.scan(packages)
-        advices = self._scanner.scan(packages, marker=ADVICE_MARKER_ATTRIBUTE)
+    def add_to(self, api: NinjaAPI) -> ScannedControllers:
+        """Adds one router per controller and the error answers of every advice to `api`."""
+        modules = [importlib.import_module(name) for name in self._component_scan.module_names()]
+        controllers = _classes_marked(CONTROLLER_MAPPING_ATTRIBUTE, modules)
+        advices = _classes_marked(ADVICE_MARKER_ATTRIBUTE, modules)
         endpoints_by_controller = {controller: self._endpoints_of(controller) for controller in controllers}
         self._refuse_ambiguous_routes([e for endpoints in endpoints_by_controller.values() for e in endpoints])
         for controller_class, endpoints in endpoints_by_controller.items():
             prefix = self._controller_mapping(controller_class).prefix
             api.add_router(prefix, self._router_for(controller_class, endpoints))
         self._register_error_answers(api, advices)
-        return MountedRestComponents(controllers=controllers, advices=advices)
+        return ScannedControllers(controllers=controllers, advices=advices)
 
     def _controller_mapping(self, controller_class: type) -> ControllerMapping:
         mapping: ControllerMapping = getattr(controller_class, CONTROLLER_MAPPING_ATTRIBUTE)
@@ -119,3 +117,15 @@ class RestControllerMounter:
                 f"Ambiguous mapping: {error_type.__name__} is answered by {earlier} and {by}."
             )
         answered_by[error_type] = by
+
+
+def _classes_marked(marker: str, modules: Sequence[ModuleType]) -> list[type]:
+    # A class imported into another module is found once, where it is defined; sorted, so the routes are always
+    # registered in the same order.
+    found = {
+        f"{candidate.__module__}.{candidate.__qualname__}": candidate
+        for module in modules
+        for candidate in vars(module).values()
+        if isinstance(candidate, type) and marker in vars(candidate) and candidate.__module__ == module.__name__
+    }
+    return [found[name] for name in sorted(found)]

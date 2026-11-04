@@ -8,7 +8,7 @@ class RouteMarkers:
     """Marks controller methods as endpoints, like Spring's `@GetMapping` and `@PostMapping`.
 
     A marker only records a RouteMapping on the method; it changes nothing else. The
-    RestControllerMounter reads the marks when it builds the Ninja routers. Use the
+    ControllerScan reads the marks when it builds the Ninja routers. Use the
     module-level instance: `@route.get("/{workshop_id}", response=WorkshopViewDTO)`.
     """
 

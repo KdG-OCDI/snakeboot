@@ -1,7 +1,30 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.3,<0.4`.
+a minor release may break the API: pin `snakeboot>=0.4,<0.5`.
+
+## 0.4.0
+
+- `snakeboot.configuration`: a section is a component of the module that declares it. `@configuration_properties`
+  puts a wireup provider next to the section, so the section enters the container with its module, like
+  `@ConfigurationPropertiesScan`. `Configuration.injectables()` is gone.
+- `snakeboot.configuration`: the configuration is read in two steps. `begin_configuration` reads the sections known
+  before the container is built (`optional` ones only when their table is there) and leaves the other tables;
+  `Configuration.complete` reads everything again with the sections of the container and refuses a table that no
+  section claims. `load_configuration` takes both steps at once, as before. `sections_declared_in(module)` finds the
+  sections a module declares.
+- `snakeboot.django_application` (extras `configuration` and `django`): `configure_django`, at the bottom of
+  settings.py, sets `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `LOGGING`, `DATABASES` and `CACHES` from
+  `application.toml`, and `WIREUP` from the component scan; the app reads the sections of the container when Django
+  starts. A setting that settings.py sets too stops the start.
+- `snakeboot.rest`: `ControllerScan(component_scan).add_to(api)` replaces `RestControllerMounter().mount(api, scan=...)`
+  and `RestControllerScanner`. It finds the controllers and advices in the modules of the component scan, the same
+  modules that fill the container, instead of scanning packages a second time. `MountedRestComponents` is now
+  `ScannedControllers`.
+- `snakeboot.configuration`: extending `Section` is the contract, as 0.3.0 documented, and it is checked by class.
+  `@configuration_properties` marks only a `Section` (also in its type), and `load_configuration` refuses a nested
+  model that does not extend `Section`, even when it is frozen and refuses unknown keys, and a `Section` that changes
+  its `model_config`. That no field has a default stays a separate rule of `load_configuration`.
 
 ## 0.3.0
 

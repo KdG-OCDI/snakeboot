@@ -13,8 +13,9 @@ classes you can read in an afternoon, and none of them knows anything about your
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
 | `@rest_controller`, `@route.get`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
-| `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@EnableConfigurationProperties`, profiles | `snakeboot[configuration]` |
+| `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@ConfigurationPropertiesScan`, profiles | `snakeboot[configuration]` |
 | `DjangoProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
+| `configure_django`, `snakeboot.django_application` | auto-configuration | `snakeboot[configuration,django]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
 
 The transaction, component scan and testing packages import nothing but the standard library,
@@ -28,39 +29,46 @@ uv add "snakeboot[configuration,django,ninja]"
 
 ## A tour
 
-**The application root.** The component scan starts in the package of the marked class, like
-`@SpringBootApplication`. It skips Django's entry points (`wsgi.py`, `asgi.py`, migrations) and
+**The application root.** The component scan decides what goes into the container. It starts in the package of
+the marked class, like `@SpringBootApplication`, skips Django's entry points (`wsgi.py`, `asgi.py`, migrations) and
 adds the components snakeboot provides itself (the event publisher).
 
 ```python
 # myapp/myapp_application.py
 @application_root
 class MyApplication: ...
-
-
-# settings.py: the setting wireup needs anyway
-WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names()], auto_inject_views=False)
 ```
 
-**Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys) is bound to one
-table of `application.toml`, like `@ConfigurationProperties`. Settings lists the sections once, like
-`@EnableConfigurationProperties`; every section then reaches wireup by its type. The sections Django itself
-needs come with snakeboot: `DjangoProperties` (`[django]`), `DatabaseProperties` (`[database]`, PostgreSQL) and
-`CacheProperties` (`[cache]`, Redis).
+**Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys, the base class of every
+configuration model) is bound to one table of `application.toml`, like `@ConfigurationProperties`. A section is a
+component of the module that declares it: when the component scan puts that module in the container, the section
+comes along, like `@ConfigurationPropertiesScan`, and an adapter asks for it by type.
 
 ```python
 @configuration_properties("chatbot")
 class ChatbotProperties(Section):
     model: str  # no default: the value is in application.toml
     llm: LanguageModelProperties  # a nested Section is the table [chatbot.llm]
-
-
-# settings.py
-CONFIGURATION = load_configuration(DjangoProperties, DatabaseProperties, ChatbotProperties, package="myapp")
-SECRET_KEY = CONFIGURATION.get(DjangoProperties).secret_key.get_secret_value()
-DATABASES = {"default": CONFIGURATION.get(DatabaseProperties).as_django_database()}
-WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names(), *CONFIGURATION.injectables()])
 ```
+
+**Django, configured.** `configure_django`, at the bottom of settings.py, does what every settings.py repeats, like
+Spring Boot's auto-configuration. settings.py names what goes into the container and its own Django apps:
+
+```python
+COMPONENT_SCAN = ComponentScan.of(MyApplication)
+INSTALLED_APPS = ["myapp.persistence"]
+MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]
+
+configure_django(__name__, package="myapp", component_scan=COMPONENT_SCAN)
+```
+
+That sets `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and `LOGGING` from `[django]`; `DATABASES` from `[database]`
+(PostgreSQL) and `CACHES` from `[cache]` (Redis), when `application.toml` has those tables; `WIREUP` from the
+component scan; and it puts wireup and `snakeboot.django_application` in `INSTALLED_APPS` and `MIDDLEWARE`. When
+Django starts, `snakeboot.django_application` reads the sections declared in the modules of the container and checks
+every table. A setting that settings.py sets itself and `configure_django` would set too stops the start.
+
+Without Django, `load_configuration(ChatbotProperties, package="myapp")` reads the sections it is given.
 
 The values come from three places, a later one overriding an earlier one key by key:
 
@@ -70,10 +78,11 @@ The values come from three places, a later one overriding an earlier one key by 
 | `application-<profile>.toml`, when `SNAKEBOOT_PROFILE` names one | what differs on a developer machine, say | `application-local.yml`, `SPRING_PROFILES_ACTIVE` |
 | environment variables `SECTION__KEY__SUBKEY` | secrets and addresses of one deployment | relaxed binding |
 
-Nothing else is read: no `.env` file, no default in code, no command line. The start stops when a model has
-a default, ignores unknown keys or is mutable; when a file or a value is missing; when a key or a table is
-unknown (a typo in `application.toml` or in `CHATBOT__LLM__MODLE`). Tables are merged, not replaced, so put the
-variant without keys of its own in `application.toml` when a profile or the environment may choose another.
+Nothing else is read: no `.env` file, no default in code, no command line. The start stops when a model does
+not extend `Section`, changes its `model_config` or has a default; when a file or a value is missing; when a key
+or a table is unknown (a typo in `application.toml` or in `CHATBOT__LLM__MODLE`). Tables are merged, not replaced,
+so put the variant without keys of its own in `application.toml` when a profile or the environment may choose
+another.
 
 **Transactions.** A use case declares its boundary; composition chooses the technology.
 
@@ -105,8 +114,9 @@ class ParticipantNotificationListener:
     def notify_promoted(self, event: WaitlistedParticipantPromoted) -> None: ...
 ```
 
-**REST controllers.** Singleton classes with constructor injection, found by the component scan.
-Two endpoints for the same URL, or two answers for one error, stop the start-up.
+**REST controllers.** Singleton classes with constructor injection. `ControllerScan` finds them in the modules of
+the component scan, the same modules that fill the container, and adds their routes to the API. Two endpoints for
+the same URL, or two answers for one error, stop the start-up.
 
 ```python
 @rest_controller("/workshops", tags=["workshops"])
@@ -126,7 +136,7 @@ class EnrollmentRestErrorAdvice:
 
 
 # urls.py
-mounted = RestControllerMounter().mount(api, scan=settings.WIREUP.injectables or ())
+ControllerScan(settings.COMPONENT_SCAN).add_to(api)
 ```
 
 ## Design rules

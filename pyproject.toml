@@ -1,6 +1,6 @@
 [project]
 name = "snakeboot"
-version = "0.3.0"
+version = "0.4.0"
 description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan, typed configuration with profiles and singleton REST controllers on Django Ninja, wired by wireup."
 readme = "README.md"
 license = "MIT"
@@ -90,6 +90,7 @@ forbidden_modules = [
     "snakeboot.events",
     "snakeboot.rest",
     "snakeboot.django",
+    "snakeboot.django_application",
     "snakeboot.testing",
 ]
 
@@ -108,6 +109,7 @@ forbidden_modules = [
     "snakeboot.events",
     "snakeboot.rest",
     "snakeboot.django",
+    "snakeboot.django_application",
     "snakeboot.testing",
 ]
 
@@ -123,19 +125,20 @@ forbidden_modules = [
     "snakeboot.component_scan",
     "snakeboot.rest",
     "snakeboot.django",
+    "snakeboot.django_application",
     "snakeboot.testing",
 ]
 
 [[tool.importlinter.contracts]]
-name = "rest knows Ninja and wireup, but not the transaction and event libraries"
+name = "rest knows Ninja, wireup and the component scan, but not the transaction and event libraries"
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [
     "snakeboot.configuration",
     "snakeboot.transaction",
     "snakeboot.events",
-    "snakeboot.component_scan",
     "snakeboot.django",
+    "snakeboot.django_application",
     "snakeboot.testing",
 ]
 
@@ -150,6 +153,7 @@ forbidden_modules = [
     "snakeboot.component_scan",
     "snakeboot.events",
     "snakeboot.rest",
+    "snakeboot.django_application",
     "snakeboot.testing",
 ]
 
@@ -167,6 +171,7 @@ forbidden_modules = [
     "snakeboot.rest",
     "snakeboot.events",
     "snakeboot.django",
+    "snakeboot.django_application",
 ]
 
 [[tool.importlinter.contracts]]
@@ -178,6 +183,20 @@ forbidden_modules = [
     "ninja",
     "snakeboot.transaction",
     "snakeboot.component_scan",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.django_application",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "django_application brings Django, the container and the configuration together, and nothing else"
+type = "forbidden"
+source_modules = ["snakeboot.django_application"]
+forbidden_modules = [
+    "ninja",
+    "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.rest",
     "snakeboot.django",

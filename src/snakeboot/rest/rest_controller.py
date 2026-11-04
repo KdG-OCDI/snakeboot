@@ -11,8 +11,8 @@ def rest_controller[C: type](prefix: str, *, tags: Sequence[str] = ()) -> Callab
 
     The class becomes a wireup singleton (do not add `@injectable` yourself): its
     constructor receives facade ports by type, it is created once, and the container
-    refuses to start when a dependency is missing. RestControllerMounter finds it by
-    scanning and turns its `@route` methods into Ninja endpoints under `prefix`.
+    refuses to start when a dependency is missing. ControllerScan finds it in the
+    modules of the component scan and turns its `@route` methods into Ninja endpoints under `prefix`.
     """
     if prefix != "" and not prefix.startswith("/"):
         raise InvalidRestControllerError(f"A controller prefix starts with '/', got {prefix!r}.")

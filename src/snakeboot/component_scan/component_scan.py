@@ -46,8 +46,8 @@ class ComponentScan:
     removes them all.
 
     `module_names()` lists plain modules only, never packages. Given a package, wireup
-    and the controller scanner import every file below it themselves, past any exclusion;
-    given only modules, both look exactly where this scan points. Finding the names
+    imports every file below it itself, past any exclusion; given only modules, wireup and
+    `ControllerScan` look exactly where this scan points. Finding the names
     imports nothing, so settings can call it before Django has started.
     """
 

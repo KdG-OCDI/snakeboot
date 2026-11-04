@@ -4,17 +4,20 @@ from typing import get_args, get_origin
 from pydantic import BaseModel
 
 from snakeboot.configuration.configuration_errors import InvalidConfigurationPropertiesError
+from snakeboot.configuration.section import Section
 
 
-def refuse_loose_models(section: type[BaseModel]) -> None:
-    """Refuses a section whose model, or a model nested in it, could get a value from somewhere else.
+def refuse_loose_models(section: type[Section]) -> None:
+    """Refuses a section whose model, or a model nested in it, breaks one of two rules.
 
-    A default in code is a second place for a value next to application.toml. A model that ignores
-    unknown keys turns a typo into a setting that silently does nothing. A mutable model lets a value
-    change after start-up.
+    Every model extends `Section` and keeps its `model_config`: a model that ignores unknown keys turns a typo
+    into a setting that silently does nothing, and a mutable model lets a value change after start-up.
+
+    No field has a default: a default in code is a second place for a value next to application.toml.
     """
     for model in _models_in(section):
-        _refuse_open_model(model)
+        _refuse_model_outside_section(model)
+        _refuse_reopened_model_config(model)
         _refuse_defaults(model)
 
 
@@ -39,11 +42,20 @@ def _models_named_by(annotation: object) -> Iterator[type[BaseModel]]:
         yield from _models_named_by(argument)
 
 
-def _refuse_open_model(model: type[BaseModel]) -> None:
+def _refuse_model_outside_section(model: type[BaseModel]) -> None:
+    # Checked by class, not by model_config alone: the contract is the base class, whose rules may grow.
+    if not issubclass(model, Section):
+        raise InvalidConfigurationPropertiesError(
+            f"{model.__name__} must extend Section, like every configuration model and every table nested in one: "
+            "an unknown key is a typo that must stop the start, and the configuration does not change while running."
+        )
+
+
+def _refuse_reopened_model_config(model: type[BaseModel]) -> None:
     if model.model_config.get("extra") != "forbid" or model.model_config.get("frozen") is not True:
         raise InvalidConfigurationPropertiesError(
-            f"{model.__name__} must extend Section (extra='forbid', frozen=True): an unknown key is a typo that "
-            "must stop the start, and the configuration does not change while running."
+            f"{model.__name__} changes the model_config of Section: keep extra='forbid' and frozen=True, so a typo "
+            "stops the start and the configuration does not change while running."
         )
 
 

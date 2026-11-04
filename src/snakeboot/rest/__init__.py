@@ -14,30 +14,28 @@
         def answer_not_found(self, error: Exception) -> dict[str, str]:
             return error_answer(error)
 
-Composition mounts every controller and advice it finds in the modules wireup scans:
+Composition adds every controller and advice in the modules of the component scan to its API:
 
-    RestControllerMounter().mount(api, scan=settings.WIREUP.injectables or ())
+    ControllerScan(settings.COMPONENT_SCAN).add_to(api)
 
 It knows Django Ninja and wireup, but nothing of the application (extra: snakeboot[ninja]).
 """
 
 from snakeboot.rest.authenticated_principal import authenticated_principal
 from snakeboot.rest.controller_endpoint_factory import ControllerEndpointFactory
+from snakeboot.rest.controller_scan import ControllerScan, ScannedControllers
 from snakeboot.rest.error_answer import error_answer
 from snakeboot.rest.rest_controller import rest_controller
 from snakeboot.rest.rest_controller_advice import exception_handler, rest_controller_advice
 from snakeboot.rest.rest_controller_errors import InvalidRestControllerError, NoAuthenticatedPrincipalError
-from snakeboot.rest.rest_controller_mounter import MountedRestComponents, RestControllerMounter
-from snakeboot.rest.rest_controller_scanner import RestControllerScanner
 from snakeboot.rest.route_markers import route
 
 __all__ = [
     "ControllerEndpointFactory",
+    "ControllerScan",
     "InvalidRestControllerError",
-    "MountedRestComponents",
     "NoAuthenticatedPrincipalError",
-    "RestControllerMounter",
-    "RestControllerScanner",
+    "ScannedControllers",
     "authenticated_principal",
     "error_answer",
     "exception_handler",

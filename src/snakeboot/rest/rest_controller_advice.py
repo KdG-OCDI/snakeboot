@@ -14,7 +14,7 @@ from snakeboot.rest.rest_controller_mappings import (
 def rest_controller_advice[C: type](advice_class: C) -> C:
     """Declares how errors become HTTP answers for every controller, like Spring's `@RestControllerAdvice`.
 
-    The class becomes a wireup singleton, like a controller. RestControllerMounter finds it
+    The class becomes a wireup singleton, like a controller. ControllerScan finds it
     with the same component scan and registers each `@exception_handler` method with Ninja,
     so composition never lists an error translation.
     """
