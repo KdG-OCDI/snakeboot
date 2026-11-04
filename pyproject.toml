@@ -191,15 +191,33 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "django_application brings Django, the container and the configuration together, and nothing else"
+name = "django_application starts the container, the configuration and the transactions on Django, and nothing else"
 type = "forbidden"
 source_modules = ["snakeboot.django_application"]
 forbidden_modules = [
     "ninja",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "openapi is standard library only, so an application class can use it before Django starts"
+type = "forbidden"
+source_modules = ["snakeboot.openapi"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "wireup",
+    "pydantic",
+    "pydantic_settings",
+    "snakeboot.configuration",
+    "snakeboot.component_scan",
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.rest",
     "snakeboot.django",
+    "snakeboot.django_application",
     "snakeboot.testing",
 ]
 

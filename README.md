@@ -15,7 +15,11 @@ classes you can read in an afternoon, and none of them knows anything about your
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
 | `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@ConfigurationPropertiesScan`, profiles | `snakeboot[configuration]` |
 | `DjangoProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
-| `configure_django`, `snakeboot.django_application` | auto-configuration | `snakeboot[configuration,django]` |
+| `run`, `wsgi_application`, `django_settings` | `SpringApplication.run`, auto-configuration | `snakeboot[configuration,django]` |
+| `DjangoConfigurer` | `WebMvcConfigurer` | `snakeboot[configuration,django]` |
+| `BearerAuthentication` | a `SecurityFilterChain` bean | `snakeboot[ninja]` |
+| `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
+| `rest_api`, `snakeboot.rest.urls` | the REST API and `/health` of the application | `snakeboot[ninja]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
 
 The transaction, component scan and testing packages import nothing but the standard library,
@@ -29,15 +33,26 @@ uv add "snakeboot[configuration,django,ninja]"
 
 ## A tour
 
-**The application root.** The component scan decides what goes into the container. It starts in the package of
-the marked class, like `@SpringBootApplication`, skips Django's entry points (`wsgi.py`, `asgi.py`, migrations) and
-adds the components snakeboot provides itself (the event publisher).
+**The application.** A class marked with `@application_root`, like `@SpringBootApplication`, is the application.
+Its component scan decides what goes into the container: the package of the class, or the packages `base_packages`
+names. The scan skips Django's entry points (`wsgi.py`, `asgi.py`, migrations) and adds the components snakeboot
+provides itself (the event publisher). `run` starts it, like `SpringApplication.run`.
 
 ```python
 # myapp/myapp_application.py
-@application_root
+@openapi_definition(title="My service", version="1.0.0")
+@application_root(base_packages=("myapp_core",))
 class MyApplication: ...
+
+
+# manage.py and myapp/__main__.py               # myapp/wsgi.py, for gunicorn
+run(MyApplication)                               application = wsgi_application(MyApplication)
 ```
+
+The application writes no settings.py and no urls.py: snakeboot owns Django's settings module and builds every
+setting from the application class and its `application.toml`, next to it (`django_settings`, below). Nothing can
+change them after snakeboot. The URLs are the REST API under `/api/`, described by `@openapi_definition`, and
+`/health`.
 
 **Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys, the base class of every
 configuration model) is bound to one table of `application.toml`, like `@ConfigurationProperties`. A section is a
@@ -51,22 +66,32 @@ class ChatbotProperties(Section):
     llm: LanguageModelProperties  # a nested Section is the table [chatbot.llm]
 ```
 
-**Django, configured.** `configure_django`, at the bottom of settings.py, does what every settings.py repeats, like
-Spring Boot's auto-configuration. settings.py names what goes into the container and its own Django apps:
+**Django, configured.** `django_settings(MyApplication)` builds the settings, like Spring Boot's
+auto-configuration: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and `LOGGING` from `[django]`; `DATABASES` from
+`[database]` (PostgreSQL) and `CACHES` from `[cache]` (Redis), when `application.toml` has those tables; the container
+(`WIREUP`) from the component scan; and `INSTALLED_APPS`: snakeboot, wireup and every Django `AppConfig` of the
+component scan. The scan finds them, and the models, by reading the source, so nothing is imported before Django
+starts; a model outside every app stops the start. When Django starts, `snakeboot.django_application` reads the
+sections declared in the modules of the container, checks every table and, with a database, installs the transaction
+manager of `@transactional`.
+
+Django apps and middleware from outside the project come from a `DjangoConfigurer`, like a `WebMvcConfigurer`.
+snakeboot finds it in the component scan or next to the application class, as it finds an `AppConfig`, and imports
+its module while it builds the settings, so that module holds strings only:
 
 ```python
-COMPONENT_SCAN = ComponentScan.of(MyApplication)
-INSTALLED_APPS = ["myapp.persistence"]
-MIDDLEWARE = ["django.middleware.common.CommonMiddleware"]
-
-configure_django(__name__, package="myapp", component_scan=COMPONENT_SCAN)
+class CorsConfigurer(DjangoConfigurer):
+    installed_apps = ("corsheaders",)
+    middleware = ("corsheaders.middleware.CorsMiddleware",)  # after wireup's, before CommonMiddleware
 ```
 
-That sets `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and `LOGGING` from `[django]`; `DATABASES` from `[database]`
-(PostgreSQL) and `CACHES` from `[cache]` (Redis), when `application.toml` has those tables; `WIREUP` from the
-component scan; and it puts wireup and `snakeboot.django_application` in `INSTALLED_APPS` and `MIDDLEWARE`. When
-Django starts, `snakeboot.django_application` reads the sections declared in the modules of the container and checks
-every table. A setting that settings.py sets itself and `configure_django` would set too stops the start.
+A test that needs a double takes the settings and replaces that one setting:
+
+```python
+# settings_under_test.py, the DJANGO_SETTINGS_MODULE of the tests
+globals().update(django_settings(MyApplication))
+DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
+```
 
 Without Django, `load_configuration(ChatbotProperties, package="myapp")` reads the sections it is given.
 
@@ -97,7 +122,7 @@ class CancelRegistrationUseCase:
         self._events.publish_all(workshop.pull_events())
 
 
-# composition, at start-up
+# at start-up; snakeboot.django_application does this itself when the application has a database
 TransactionManagerRegistry.install(DjangoAtomicTransactionManager())
 ```
 
@@ -135,8 +160,23 @@ class EnrollmentRestErrorAdvice:
         return error_answer(error)  # {"code": "workshop_not_found", "detail": "..."}
 
 
-# urls.py
-ControllerScan(settings.COMPONENT_SCAN).add_to(api)
+# what snakeboot.rest.urls does for the application
+ControllerScan(ComponentScan.of(MyApplication)).add_to(api)
+```
+
+**Authentication.** An adapter that extends `BearerAuthentication` is a component of the container, like a
+`SecurityFilterChain` bean: its constructor receives sections and ports by type. With one in the component scan, every
+endpoint needs `Authorization: Bearer <token>`, the OpenAPI document says so, and `authenticated_principal(request)`
+returns whom the token belongs to. `/health` stays open; an endpoint opts out with `auth=None`.
+
+```python
+class KeycloakTokens(BearerAuthentication):
+    def __init__(self, properties: SecurityProperties) -> None:
+        self._properties = properties
+
+    @override
+    def authenticate(self, token: str) -> str | None:
+        ...  # the subject of a valid token, or None for 401
 ```
 
 ## Design rules

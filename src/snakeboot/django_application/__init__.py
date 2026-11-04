@@ -1,14 +1,30 @@
-"""Django integration of the container and the configuration (extras: `snakeboot[configuration,django]`).
+"""Django integration of the application: its settings, its container and its start (extras `configuration`, `django`).
 
-    # settings.py, at the bottom
-    COMPONENT_SCAN = ComponentScan(base_packages=("myservice_core",))
-    configure_django(__name__, package="myservice", component_scan=COMPONENT_SCAN)
+    # myapp/myapp_application.py
+    @application_root(base_packages=("myapp_core",))
+    class MyApplication: ...
 
-`configure_django` sets Django's settings from application.toml (`[django]`, and `[database]` and `[cache]` when
-they are there) and the container from the component scan. When Django starts, this app reads the sections declared
-in the modules of the container, so settings.py lists no section and no wireup setting.
+    # manage.py and myapp/__main__.py            # myapp/wsgi.py, for gunicorn
+    run(MyApplication)                            application = wsgi_application(MyApplication)
+
+Like Spring Boot, the application writes no settings: snakeboot builds them from the application class and its
+application.toml (`django_settings`). When Django starts, this app reads the sections declared in the modules of the
+container and, with a database, installs the transaction manager of `@transactional`. A `DjangoConfigurer` in the
+scan adds Django apps and middleware from outside the project.
 """
 
-from snakeboot.django_application.configure_django import APPLICATION, configure_django
+from snakeboot.django_application.django_configurer import DjangoConfigurer
+from snakeboot.django_application.django_settings import APPLICATION_SETTING, django_settings
+from snakeboot.django_application.entry_points import APPLICATION_VARIABLE, SETTINGS_MODULE, run, wsgi_application
+from snakeboot.django_application.installed_apps import APPLICATION
 
-__all__ = ["APPLICATION", "configure_django"]
+__all__ = [
+    "APPLICATION",
+    "APPLICATION_SETTING",
+    "APPLICATION_VARIABLE",
+    "SETTINGS_MODULE",
+    "DjangoConfigurer",
+    "django_settings",
+    "run",
+    "wsgi_application",
+]

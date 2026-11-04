@@ -10,7 +10,7 @@ Standard library only: it finds module names without importing them, so settings
 before Django has started.
 """
 
-from snakeboot.component_scan.application_root import application_root
+from snakeboot.component_scan.application_root import application_package, application_root
 from snakeboot.component_scan.component_scan import (
     DJANGO_ENTRY_POINTS,
     SNAKEBOOT_AUTO_CONFIGURATION,
@@ -23,5 +23,6 @@ __all__ = [
     "SNAKEBOOT_AUTO_CONFIGURATION",
     "ComponentScan",
     "InvalidApplicationRootError",
+    "application_package",
     "application_root",
 ]

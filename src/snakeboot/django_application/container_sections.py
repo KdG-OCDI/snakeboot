@@ -18,8 +18,8 @@ def complete_configuration(settings: object) -> None:
     container = getattr(settings, "WIREUP", None)
     if not isinstance(configuration, Configuration) or not isinstance(container, WireupSettings):
         raise ImproperlyConfigured(
-            "snakeboot.django_application needs the settings CONFIGURATION and WIREUP: call configure_django at the "
-            "bottom of settings.py."
+            "snakeboot.django_application needs the settings CONFIGURATION and WIREUP: start the application with "
+            "snakeboot's run(MyApplication) or wsgi_application(MyApplication), or take django_settings(MyApplication)."
         )
     configuration.complete(*_sections_in(container))
 

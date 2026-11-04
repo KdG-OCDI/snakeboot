@@ -1,0 +1,5 @@
+[django]
+secret_key = "test-only-secret"
+debug = false
+allowed_hosts = ["*"]
+log_level = "INFO"

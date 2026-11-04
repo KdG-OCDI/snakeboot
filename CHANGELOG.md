@@ -13,10 +13,29 @@ a minor release may break the API: pin `snakeboot>=0.4,<0.5`.
   `Configuration.complete` reads everything again with the sections of the container and refuses a table that no
   section claims. `load_configuration` takes both steps at once, as before. `sections_declared_in(module)` finds the
   sections a module declares.
-- `snakeboot.django_application` (extras `configuration` and `django`): `configure_django`, at the bottom of
-  settings.py, sets `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `LOGGING`, `DATABASES` and `CACHES` from
-  `application.toml`, and `WIREUP` from the component scan; the app reads the sections of the container when Django
-  starts. A setting that settings.py sets too stops the start.
+- An application is a class marked with `@application_root`, like `@SpringBootApplication`, started with
+  `run(MyApplication)` (manage.py, `python -m`) or `wsgi_application(MyApplication)` (gunicorn), like
+  `SpringApplication.run`. It writes no settings.py and no urls.py: snakeboot owns Django's settings module
+  (`snakeboot.django_application.settings`), so nothing can change the settings after snakeboot.
+- `@application_root(base_packages=...)` names the packages of the container, like `scanBasePackages`;
+  `application_package(cls)` is the package of the application, where `application.toml` lies.
+- `snakeboot.django_application` (extras `configuration` and `django`): `django_settings(MyApplication)` builds every
+  Django setting: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS`, `LOGGING`, `DATABASES` and `CACHES` from `application.toml`,
+  `WIREUP` from the component scan, `INSTALLED_APPS` from the Django `AppConfig`s in the component scan, and Django's
+  defaults for the rest. When Django starts, the app reads the sections of the container and, with a database,
+  installs `DjangoAtomicTransactionManager` for `@transactional`. A model outside every app stops the start.
+- `snakeboot.django_application`: a `DjangoConfigurer` in the component scan or next to the application class adds
+  Django apps (`installed_apps`) and middleware (`middleware`, between wireup's and CommonMiddleware), like a
+  `WebMvcConfigurer`; snakeboot finds it by reading the source, like an `AppConfig`.
+- `snakeboot.rest`: an adapter that extends `BearerAuthentication` is a component of the container, like a
+  `SecurityFilterChain` bean; with one in the component scan, every endpoint needs a bearer token it accepts.
+- `snakeboot.component_scan`: `ComponentScan.classes_extending(base)` lists the classes written as subclasses of
+  `base`, by reading the source.
+- `snakeboot.openapi` (standard library only): `@openapi_definition(title, version, description)` describes the
+  API, like springdoc's `@OpenAPIDefinition`. `snakeboot.rest`: `rest_api(MyApplication)` builds it, and `snakeboot.rest.urls` serves it under `/api/`, next
+  to `/health` (`{"status": "ok", "service": "<package>"}`).
+- `snakeboot.component_scan`: `ComponentScan.app_configs()` and `ComponentScan.models()` list the Django `AppConfig`s
+  and models under the base packages, by reading the source: nothing is imported, so settings can use them.
 - `snakeboot.rest`: `ControllerScan(component_scan).add_to(api)` replaces `RestControllerMounter().mount(api, scan=...)`
   and `RestControllerScanner`. It finds the controllers and advices in the modules of the component scan, the same
   modules that fill the container, instead of scanning packages a second time. `MountedRestComponents` is now

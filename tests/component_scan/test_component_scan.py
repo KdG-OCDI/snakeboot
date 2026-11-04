@@ -91,3 +91,31 @@ def test_the_auto_configuration_can_be_turned_off() -> None:
 
 def test_an_auto_configured_module_is_listed_once_even_when_scanned_as_well() -> None:
     assert ComponentScan(("snakeboot.events",)).module_names().count(PUBLISHER) == 1
+
+
+DJANGO_PROJECT = "tests.component_scan.sample_django_project"
+
+
+def test_lists_the_app_configs_written_as_appconfig_or_apps_appconfig() -> None:
+    assert ComponentScan((DJANGO_PROJECT,)).app_configs() == [
+        f"{DJANGO_PROJECT}.cli.apps.NotesCliConfig",
+        f"{DJANGO_PROJECT}.persistence.apps.NotesPersistenceConfig",
+    ]
+
+
+def test_lists_the_models() -> None:
+    assert ComponentScan((DJANGO_PROJECT,)).models() == [f"{DJANGO_PROJECT}.persistence.models.NoteOrmEntity"]
+
+
+def test_finding_app_configs_and_models_imports_nothing() -> None:
+    """The sample models.py raises when imported, as a real one would before Django has started."""
+    ComponentScan((DJANGO_PROJECT,)).models()
+
+    assert f"{DJANGO_PROJECT}.persistence.models" not in sys.modules
+    assert f"{DJANGO_PROJECT}.persistence.apps" not in sys.modules
+
+
+def test_a_project_without_django_apps_has_none() -> None:
+    scan = ComponentScan((PROJECT,))
+
+    assert (scan.app_configs(), scan.models()) == ([], [])

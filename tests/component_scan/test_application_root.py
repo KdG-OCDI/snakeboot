@@ -2,7 +2,13 @@
 
 import pytest
 
-from snakeboot.component_scan import DJANGO_ENTRY_POINTS, ComponentScan, InvalidApplicationRootError, application_root
+from snakeboot.component_scan import (
+    DJANGO_ENTRY_POINTS,
+    ComponentScan,
+    InvalidApplicationRootError,
+    application_package,
+    application_root,
+)
 
 THIS_PACKAGE = "tests.component_scan"
 
@@ -14,6 +20,11 @@ class BareApplication:
 
 @application_root(exclude=("*.test_component_scan",))
 class ApplicationWithOwnExclusions:
+    pass
+
+
+@application_root(base_packages=("tests.component_scan.sample_project", "tests.component_scan.sample_django_project"))
+class ApplicationOfOtherPackages:
     pass
 
 
@@ -66,3 +77,14 @@ def test_a_class_in_a_package_init_scans_that_package() -> None:
     package_class = type("PackageApplication", (), {"__module__": "tests"})
 
     assert ComponentScan.of(application_root(package_class)).base_packages == ("tests",)
+
+
+def test_base_packages_name_the_packages_of_the_container_instead() -> None:
+    assert ComponentScan.of(ApplicationOfOtherPackages).base_packages == (
+        "tests.component_scan.sample_project",
+        "tests.component_scan.sample_django_project",
+    )
+
+
+def test_the_files_of_an_application_stay_in_the_package_of_its_class() -> None:
+    assert application_package(ApplicationOfOtherPackages) == THIS_PACKAGE

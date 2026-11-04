@@ -1,3 +1,4 @@
+import ast
 import importlib.util
 import pkgutil
 from collections.abc import Iterator
@@ -69,8 +70,39 @@ class ComponentScan:
 
         Excluded modules are left out, auto-configuration included.
         """
-        scanned = (name for base_package in self.base_packages for name in self._modules_under(base_package))
+        scanned = self._scanned_files().keys()
         return sorted({name for name in (*scanned, *self.auto_configuration) if not self.is_excluded(name)})
+
+    def app_configs(self) -> list[str]:
+        """Returns the dotted path of every Django `AppConfig` declared under the base packages, sorted.
+
+        Django takes such a path in INSTALLED_APPS. The scan reads the source and imports nothing, so settings can
+        call it before Django has started: a class counts when its base is written `AppConfig` or `apps.AppConfig`.
+        """
+        return self.classes_extending("AppConfig")
+
+    def models(self) -> list[str]:
+        """Returns the dotted path of every Django model declared under the base packages, sorted.
+
+        Read from the source like `app_configs`: a class counts when its base is written `Model` or `models.Model`.
+        """
+        return self.classes_extending("Model")
+
+    def classes_extending(self, base: str) -> list[str]:
+        """Returns the dotted path of every class under the base packages whose base is written `base`, sorted.
+
+        `base` is a class name: `AppConfig` matches `class X(AppConfig)` and `class X(apps.AppConfig)`. Only the
+        source is read, so a subclass of a subclass of `base` does not count.
+        """
+        return sorted(
+            f"{module_name}.{declared}"
+            for module_name, path in self._scanned_files().items()
+            for declared in _classes_in(path, extending=base)
+        )
+
+    def _scanned_files(self) -> dict[str, Path]:
+        files = {name: path for package in self.base_packages for name, path in self._modules_under(package)}
+        return {name: path for name, path in files.items() if not self.is_excluded(name)}
 
     def is_excluded(self, module_name: str) -> bool:
         """Tells whether a default or an own exclusion pattern matches the module or one of its parent packages.
@@ -83,22 +115,38 @@ class ComponentScan:
             for pattern in (*self.default_exclude, *self.exclude)
         )
 
-    def _modules_under(self, package_name: str) -> Iterator[str]:
+    def _modules_under(self, package_name: str) -> Iterator[tuple[str, Path]]:
         spec = importlib.util.find_spec(package_name)
         if spec is None:
             raise ModuleNotFoundError(
                 f"The component scan cannot find the package {package_name!r}.", name=package_name
             )
         if spec.submodule_search_locations is None:
-            yield package_name
+            yield package_name, Path(spec.origin or "")
             return
         for location in spec.submodule_search_locations:
             yield from self._modules_in_directory(Path(location), package_name)
 
-    def _modules_in_directory(self, directory: Path, package_name: str) -> Iterator[str]:
+    def _modules_in_directory(self, directory: Path, package_name: str) -> Iterator[tuple[str, Path]]:
         for module in pkgutil.iter_modules([str(directory)]):
             name = f"{package_name}.{module.name}"
             if module.ispkg:
                 yield from self._modules_in_directory(directory / module.name, name)
             else:
-                yield name
+                yield name, directory / f"{module.name}.py"
+
+
+def _classes_in(path: Path, *, extending: str) -> Iterator[str]:
+    # Only the source is read: importing a models.py before Django has started fails.
+    if path.suffix != ".py" or not path.is_file():
+        return
+    for node in ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body:
+        if isinstance(node, ast.ClassDef) and extending in (_written_name(base) for base in node.bases):
+            yield node.name
+
+
+def _written_name(base: ast.expr) -> str:
+    # `AppConfig` and `apps.AppConfig` both name the class AppConfig.
+    if isinstance(base, ast.Attribute):
+        return base.attr
+    return base.id if isinstance(base, ast.Name) else ""
