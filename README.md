@@ -175,8 +175,7 @@ class KeycloakTokens(BearerAuthentication):
         self._properties = properties
 
     @override
-    def authenticate(self, token: str) -> str | None:
-        ...  # the subject of a valid token, or None for 401
+    def authenticate(self, token: str) -> str | None: ...  # the subject of a valid token, or None for 401
 ```
 
 ## Design rules
