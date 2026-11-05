@@ -10,7 +10,7 @@ def rest_controller[C: type](prefix: str, *, tags: Sequence[str] = ()) -> Callab
     """Declares a REST controller, like Spring's `@RestController` with `@RequestMapping(prefix)`.
 
     The class becomes a wireup singleton (do not add `@injectable` yourself): its
-    constructor receives facade ports by type, it is created once, and the container
+    constructor receives its dependencies by type, it is created once, and the container
     refuses to start when a dependency is missing. ControllerScan finds it in the
     modules of the component scan and turns its `@route` methods into Ninja endpoints under `prefix`.
     """
