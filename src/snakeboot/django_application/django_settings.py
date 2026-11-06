@@ -9,6 +9,7 @@ from snakeboot.configuration import (
     Configuration,
     DatabaseProperties,
     DjangoProperties,
+    OAuth2Properties,
     begin_configuration,
 )
 from snakeboot.django_application.django_configurer import configurers_in
@@ -28,7 +29,8 @@ def django_settings(application: type) -> dict[str, Any]:
         SECRET_KEY, DEBUG, ALLOWED_HOSTS, LOGGING    from [django]
         DATABASES                                    from [database], when the application has that table
         CACHES                                       from [cache], when the application has that table
-        CONFIGURATION                                the sections read, completed when Django starts
+        CONFIGURATION                                the sections read, completed when Django starts; [oauth2],
+                                                     when there, for a JwtBearerAuthentication
         WIREUP                                       the container: the modules of the component scan
         INSTALLED_APPS                               snakeboot, wireup, every AppConfig, and what DjangoConfigurers add
         MIDDLEWARE                                   wireup's, what DjangoConfigurers add, then CommonMiddleware
@@ -44,7 +46,9 @@ def django_settings(application: type) -> dict[str, Any]:
     scans = (component_scan, ComponentScan((application_package(application),), auto_configuration=()))
     configurers = configurers_in(scans)
     configuration = begin_configuration(
-        DjangoProperties, optional=(DatabaseProperties, CacheProperties), package=application_package(application)
+        DjangoProperties,
+        optional=(DatabaseProperties, CacheProperties, OAuth2Properties),
+        package=application_package(application),
     )
     return {
         APPLICATION_SETTING: application,

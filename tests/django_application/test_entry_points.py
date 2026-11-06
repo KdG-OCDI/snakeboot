@@ -1,4 +1,4 @@
-"""`run` and `wsgi_application` name the application, and snakeboot's settings module builds its settings."""
+"""`run`, `wsgi_application` and `asgi_application` name the application and start it on snakeboot's settings."""
 
 import importlib
 import os
@@ -8,7 +8,14 @@ from types import ModuleType
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
-from snakeboot.django_application import APPLICATION_VARIABLE, SETTINGS_MODULE, entry_points, run, wsgi_application
+from snakeboot.django_application import (
+    APPLICATION_VARIABLE,
+    SETTINGS_MODULE,
+    asgi_application,
+    entry_points,
+    run,
+    wsgi_application,
+)
 from snakeboot.django_application.entry_points import application_named_in_environment
 from tests.django_application.service.applications import ServiceApplication
 
@@ -39,6 +46,15 @@ def test_wsgi_application_names_the_application_too(monkeypatch: pytest.MonkeyPa
 
     assert wsgi_application(ServiceApplication) is handler
     assert application_named_in_environment() is ServiceApplication
+
+
+def test_asgi_application_names_the_application_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    handler = object()
+    monkeypatch.setattr(entry_points, "get_asgi_application", lambda: handler)
+
+    assert asgi_application(ServiceApplication) is handler
+    assert application_named_in_environment() is ServiceApplication
+    assert os.environ["DJANGO_SETTINGS_MODULE"] == SETTINGS_MODULE
 
 
 def test_without_a_named_application_the_start_stops() -> None:

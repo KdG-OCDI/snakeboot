@@ -1,6 +1,6 @@
 [project]
 name = "snakeboot"
-version = "0.4.0"
+version = "0.5.0"
 description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan, typed configuration with profiles and singleton REST controllers on Django Ninja, wired by wireup."
 readme = "README.md"
 license = "MIT"
@@ -40,6 +40,8 @@ django = ["django>=6.1.1"]
 ninja = ["django>=6.1.1", "django-ninja>=1.7.1"]
 # Typed configuration from application.toml, one profile and the environment (snakeboot.configuration).
 configuration = ["pydantic-settings>=2.16.0,<3"]
+# Accept the JWT access tokens of an OAuth2 authorization server, such as Keycloak (snakeboot.oauth2).
+oauth2 = ["django>=6.1.1", "django-ninja>=1.7.1", "pydantic-settings>=2.16.0,<3", "pyjwt[crypto]>=2.10.1"]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
@@ -54,6 +56,7 @@ dev = [
     "mypy>=2.4.0",
     "pre-commit>=4.7.0",
     "pydantic-settings>=2.16.0,<3",
+    "pyjwt[crypto]>=2.10.1",
     "pytest>=9.1.1",
     "pytest-django>=4.14.0",
     "ruff>=0.17.1",
@@ -92,6 +95,8 @@ forbidden_modules = [
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -111,6 +116,8 @@ forbidden_modules = [
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -127,6 +134,8 @@ forbidden_modules = [
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -140,6 +149,8 @@ forbidden_modules = [
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -155,6 +166,8 @@ forbidden_modules = [
     "snakeboot.rest",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -172,6 +185,8 @@ forbidden_modules = [
     "snakeboot.events",
     "snakeboot.django",
     "snakeboot.django_application",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -188,6 +203,8 @@ forbidden_modules = [
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -199,6 +216,8 @@ forbidden_modules = [
     "snakeboot.events",
     "snakeboot.rest",
     "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 [[tool.importlinter.contracts]]
@@ -216,6 +235,20 @@ forbidden_modules = [
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.django_application",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
+]
+
+[[tool.importlinter.contracts]]
+name = "oauth2 knows the REST library, the configuration and PyJWT, but no ORM, transaction or event library"
+type = "forbidden"
+source_modules = ["snakeboot.oauth2"]
+forbidden_modules = [
+    "snakeboot.transaction",
+    "snakeboot.events",
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",

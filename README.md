@@ -15,9 +15,10 @@ classes you can read in an afternoon, and none of them knows anything about your
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
 | `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@ConfigurationPropertiesScan`, profiles | `snakeboot[configuration]` |
 | `DjangoProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
-| `run`, `wsgi_application`, `django_settings` | `SpringApplication.run`, auto-configuration | `snakeboot[configuration,django]` |
+| `run`, `wsgi_application`, `asgi_application`, `django_settings` | `SpringApplication.run`, auto-configuration | `snakeboot[configuration,django]` |
 | `DjangoConfigurer` | `WebMvcConfigurer` | `snakeboot[configuration,django]` |
 | `BearerAuthentication` | a `SecurityFilterChain` bean | `snakeboot[ninja]` |
+| `JwtBearerAuthentication`, `OAuth2Properties` | `spring-boot-starter-oauth2-resource-server`, `spring.security.oauth2.resourceserver.jwt.*` | `snakeboot[oauth2]` |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
 | `rest_api`, `snakeboot.rest.urls` | the REST API and `/health` of the application | `snakeboot[ninja]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
@@ -47,6 +48,8 @@ class MyApplication: ...
 
 # manage.py and myapp/__main__.py               # myapp/wsgi.py, for gunicorn
 run(MyApplication)                               application = wsgi_application(MyApplication)
+                                                 # myapp/asgi.py, for uvicorn (streaming, server-sent events)
+                                                 application = asgi_application(MyApplication)
 ```
 
 The application writes no settings.py and no urls.py: snakeboot owns Django's settings module and builds every
@@ -176,6 +179,23 @@ class KeycloakTokens(BearerAuthentication):
 
     @override
     def authenticate(self, token: str) -> str | None: ...  # the subject of a valid token, or None for 401
+```
+
+**Tokens of an authorization server.** For the JWT access tokens of Keycloak or another OAuth2 server, extend
+`JwtBearerAuthentication` (extra `snakeboot[oauth2]`) and add the table `[oauth2]`, like Spring Boot's resource
+server. It fetches the issuer's public keys from `jwks_uri` and caches them, and accepts a token only when the
+signature, the issuer, the audience and the expiry are right; its `sub` is the principal.
+
+```python
+class PlayerTokens(JwtBearerAuthentication):
+    """The access tokens that Keycloak gives the platform's players."""
+```
+
+```toml
+[oauth2]
+issuer_uri = "http://localhost:8180/realms/kareldegames"   # the `iss` of the tokens
+jwks_uri = "http://keycloak:8080/realms/kareldegames/protocol/openid-connect/certs"
+audience = "tictactoe"                                     # the `aud` the tokens must hold
 ```
 
 ## Design rules

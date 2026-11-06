@@ -1,7 +1,18 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.4,<0.5`.
+a minor release may break the API: pin `snakeboot>=0.5,<0.6`.
+
+## 0.5.0
+
+- `snakeboot.oauth2` (extra `oauth2`): `JwtBearerAuthentication`, like Spring Boot's oauth2 resource server. An adapter
+  that extends it accepts the signed JWT access tokens of one authorization server (Keycloak, for example): the
+  issuer's public keys come from `jwks_uri` and are cached, and a token needs the right signature, `iss`, `aud` and an
+  `exp` in the future; its `sub` is the principal.
+- `snakeboot.configuration`: `OAuth2Properties`, the section `[oauth2]` (`issuer_uri`, `jwks_uri`, `audience`).
+  `django_settings` reads it when the table is there, like `[database]` and `[cache]`, so it joins the container.
+- `snakeboot.django_application`: `asgi_application(MyApplication)` for uvicorn, next to `wsgi_application`. Under
+  ASGI a response streams from an async iterator, such as server-sent events, without holding a thread.
 
 ## 0.4.0
 

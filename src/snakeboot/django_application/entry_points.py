@@ -4,13 +4,15 @@ from collections.abc import Sequence
 from importlib import import_module
 from typing import Final
 
+from django.core.asgi import get_asgi_application
 from django.core.exceptions import ImproperlyConfigured
+from django.core.handlers.asgi import ASGIHandler
 from django.core.handlers.wsgi import WSGIHandler
 from django.core.management import execute_from_command_line
 from django.core.wsgi import get_wsgi_application
 
 APPLICATION_VARIABLE: Final = "SNAKEBOOT_APPLICATION"
-"""The environment variable that names the application class; `run` and `wsgi_application` set it."""
+"""The environment variable that names the application class; `run` and the two handlers below set it."""
 
 SETTINGS_MODULE: Final = "snakeboot.django_application.settings"
 """The settings module of every snakeboot application: DJANGO_SETTINGS_MODULE names it."""
@@ -32,6 +34,15 @@ def wsgi_application(application: type) -> WSGIHandler:
     return get_wsgi_application()
 
 
+def asgi_application(application: type) -> ASGIHandler:
+    """Returns the ASGI handler of `application`, for uvicorn: `application = asgi_application(MyApplication)`.
+
+    Under ASGI a response can stream from an async iterator, such as server-sent events, without holding a thread.
+    """
+    _start(application)
+    return get_asgi_application()
+
+
 def application_named_in_environment() -> type:
     """Returns the application class that `run` or `wsgi_application` named; without one, the start stops."""
     name = os.environ.get(APPLICATION_VARIABLE, "")
@@ -40,7 +51,7 @@ def application_named_in_environment() -> type:
     if not isinstance(application, type):
         raise ImproperlyConfigured(
             f"{APPLICATION_VARIABLE}={name!r} names no application class. Start the application with snakeboot's "
-            "run(MyApplication) or wsgi_application(MyApplication)."
+            "run(MyApplication), wsgi_application(MyApplication) or asgi_application(MyApplication)."
         )
     return application
 

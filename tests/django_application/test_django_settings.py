@@ -9,7 +9,13 @@ import wireup
 from django.core.exceptions import ImproperlyConfigured
 from pydantic import ValidationError
 
-from snakeboot.configuration import CONFIGURATION_KEY, Configuration, DatabaseProperties, DjangoProperties
+from snakeboot.configuration import (
+    CONFIGURATION_KEY,
+    Configuration,
+    DatabaseProperties,
+    DjangoProperties,
+    OAuth2Properties,
+)
 from snakeboot.django_application import APPLICATION, APPLICATION_SETTING, django_settings
 from snakeboot.django_application.container_sections import complete_configuration
 from snakeboot.django_application.installed_apps import WIREUP_APPLICATION
@@ -20,6 +26,7 @@ from tests.django_application.service.applications import (
     ServiceWithAModelApplication,
     ServiceWithoutSectionsApplication,
 )
+from tests.django_application.service_with_oauth2.applications import ServiceWithOAuth2Application
 from tests.django_application.service_without_database.applications import ServiceWithoutDatabaseApplication
 
 GREETING_PERSISTENCE_CONFIG = (
@@ -119,3 +126,14 @@ def test_a_table_no_module_of_the_container_claims_stops_the_start() -> None:
 def test_without_the_settings_of_snakeboot_the_start_stops() -> None:
     with pytest.raises(ImproperlyConfigured, match="start the application with snakeboot's run"):
         complete_configuration(SimpleNamespace())
+
+
+def test_the_oauth2_table_is_read_and_its_section_joins_the_container() -> None:
+    settings = django_settings(ServiceWithOAuth2Application)
+
+    assert configuration_of(settings).get(OAuth2Properties).audience == "greeting"
+    assert OAuth2Properties.__module__ in settings["WIREUP"].injectables
+
+
+def test_without_an_oauth2_table_there_is_no_oauth2_section() -> None:
+    assert OAuth2Properties not in configuration_of(django_settings(ServiceApplication)).sections

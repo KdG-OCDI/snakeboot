@@ -13,7 +13,7 @@ _application = getattr(settings, "APPLICATION", None)
 if not isinstance(_application, type):
     raise ImproperlyConfigured(
         "snakeboot.rest.urls needs the setting APPLICATION, the class marked with @application_root: start the "
-        "application with snakeboot's run(MyApplication) or wsgi_application(MyApplication)."
+        "application with snakeboot's run(MyApplication), wsgi_application(MyApplication) or asgi_application(...)."
     )
 
 urlpatterns = url_patterns(_application)

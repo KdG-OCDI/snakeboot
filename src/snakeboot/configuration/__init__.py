@@ -10,7 +10,8 @@ SNAKEBOOT_PROFILE is set, then environment variables such as CHATBOT__MODEL; not
 A section is a component of the module that declares it, so it enters the container with that module. In a Django
 application, `snakeboot.django_application` reads every section, Django's own included; without Django,
 `load_configuration(ChatbotProperties, package="myservice")` reads the sections it is given.
-`DjangoProperties`, `DatabaseProperties` and `CacheProperties` are the sections Django itself needs.
+`DjangoProperties`, `DatabaseProperties` and `CacheProperties` are the sections Django itself needs;
+`OAuth2Properties` names the authorization server whose tokens `snakeboot.oauth2` accepts.
 """
 
 from snakeboot.configuration.cache_properties import CacheProperties
@@ -24,6 +25,7 @@ from snakeboot.configuration.configuration_sources import BASE_FILE, PROFILE_VAR
 from snakeboot.configuration.database_properties import DatabaseProperties
 from snakeboot.configuration.django_properties import DjangoProperties
 from snakeboot.configuration.load_configuration import begin_configuration, load_configuration
+from snakeboot.configuration.oauth2_properties import OAuth2Properties
 from snakeboot.configuration.section import Section
 from snakeboot.configuration.section_prefix import sections_declared_in
 
@@ -37,6 +39,7 @@ __all__ = [
     "DatabaseProperties",
     "DjangoProperties",
     "InvalidConfigurationPropertiesError",
+    "OAuth2Properties",
     "Section",
     "begin_configuration",
     "configuration_properties",
