@@ -3,6 +3,15 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.5,<0.6`.
 
+## 0.5.2
+
+- `snakeboot.rest`: a controller is resolved under ASGI too. Under `asgi_application` wireup's request scope is
+  asynchronous and its `get` returns a coroutine, so 0.5.0 and 0.5.1 answered every call with a 500 ("The container
+  gave <coroutine ...> as the BearerAuthentication"). A synchronous endpoint now resolves synchronously, as wireup's own
+  class-based views do.
+- The release workflow downloads the new version from TestPyPI through the JSON API of that version, not through the
+  index, which the CDN may keep for ten minutes.
+
 ## 0.5.1
 
 - `snakeboot.rest`: `class X(BearerAuthentication, component=False)` marks a base meant to be extended; it is not

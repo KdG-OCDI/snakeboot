@@ -85,13 +85,15 @@ jobs:
 
       # Only snakeboot itself comes from TestPyPI: anyone can register names such as
       # "wireup" there, so its dependencies come from the real PyPI.
-      # pip runs on Python 3.13: on the runner's default Python, pip would skip snakeboot
-      # because of its Requires-Python >= 3.13 and report that no version exists.
+      # The JSON API of this one version, not pip and the index: the CDN keeps the index page /simple/snakeboot/ for up
+      # to ten minutes, so a new version can be missing there long after the upload.
       - name: Download snakeboot from TestPyPI (it may take a minute to appear)
         run: |
-          for attempt in 1 2 3 4 5 6; do
-            if uv tool run --python 3.13 --from pip pip download --no-deps --only-binary :all: \
-                --index-url https://test.pypi.org/simple/ "snakeboot==${VERSION}" --dest smoke/; then
+          mkdir -p smoke
+          for attempt in $(seq 1 12); do
+            if url=$(curl -fsS "https://test.pypi.org/pypi/snakeboot/${VERSION}/json" | python3 -c \
+                "import json, sys; print(next(u['url'] for u in json.load(sys.stdin)['urls'] if u['packagetype'] == 'bdist_wheel'))") \
+              && curl -fsSL -o "smoke/$(basename "$url")" "$url"; then
               exit 0
             fi
             echo "Could not download snakeboot ${VERSION} from TestPyPI (attempt ${attempt}); see above. Waiting."

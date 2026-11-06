@@ -5,6 +5,7 @@ from typing import Any
 
 from django.http import HttpRequest, HttpResponse
 from ninja import NinjaAPI
+from wireup import ScopedSyncContainer
 from wireup.integration.django import get_request_container
 
 from snakeboot.rest.rest_controller_errors import InvalidRestControllerError
@@ -14,8 +15,15 @@ ErrorAnswer = Callable[[HttpRequest, Exception], HttpResponse]
 
 
 def resolve_from_wireup_request_scope(controller_class: type) -> object:
-    """Asks wireup for the controller during the current request; a singleton is the same object every time."""
-    return get_request_container().get(controller_class)
+    """Asks wireup for the controller during the current request; a singleton is the same object every time.
+
+    Under WSGI the request scope is synchronous. Under ASGI it is asynchronous, and its `get` returns a coroutine; a
+    controller endpoint is synchronous, so it resolves synchronously, as wireup's own class-based views do.
+    """
+    scope = get_request_container()
+    if isinstance(scope, ScopedSyncContainer):
+        return scope.get(controller_class)
+    return scope._synchronous_get(controller_class)  # reason: wireup resolves its sync views so under ASGI
 
 
 class ControllerEndpointFactory:
