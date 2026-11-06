@@ -3,6 +3,13 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.5,<0.6`.
 
+## 0.5.1
+
+- `snakeboot.rest`: `class X(BearerAuthentication, component=False)` marks a base meant to be extended; it is not
+  registered with the container. `JwtBearerAuthentication` is such a base, so a module that imports it to extend it
+  holds one `BearerAuthentication`, not two (0.5.0 stopped such an application with
+  `DuplicateServiceRegistrationError`).
+
 ## 0.5.0
 
 - `snakeboot.oauth2` (extra `oauth2`): `JwtBearerAuthentication`, like Spring Boot's oauth2 resource server. An adapter

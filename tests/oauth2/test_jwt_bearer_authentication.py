@@ -6,12 +6,15 @@ from typing import Any
 
 import jwt
 import pytest
+import wireup
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 
 from snakeboot.configuration import OAuth2Properties
 from snakeboot.oauth2 import JwtBearerAuthentication
 from snakeboot.rest import BearerAuthentication
+from tests.oauth2.secured import player_tokens
+from tests.oauth2.secured.player_tokens import PlayerTokens
 
 ISSUER = "http://localhost:8180/realms/test"
 AUDIENCE = "greeting"
@@ -49,11 +52,9 @@ def test_a_valid_token_gives_its_subject(authentication: JwtBearerAuthentication
     assert authentication.authenticate(token()) == "ann"
 
 
-def test_a_subclass_is_the_bearer_authentication_of_the_container() -> None:
-    class PlayerTokens(JwtBearerAuthentication):
-        """Keycloak's tokens for players."""
-
-    assert vars(PlayerTokens)["__wireup_registration__"] is not None
+def test_a_subclass_is_a_component_and_the_base_is_not() -> None:
+    assert "__wireup_registration__" in vars(PlayerTokens)
+    assert "__wireup_registration__" not in vars(JwtBearerAuthentication)
 
 
 @pytest.mark.parametrize(
@@ -90,3 +91,18 @@ def test_while_the_keys_cannot_be_fetched_every_token_is_refused(monkeypatch: py
 
 def test_it_is_a_bearer_authentication() -> None:
     assert issubclass(JwtBearerAuthentication, BearerAuthentication)
+
+
+def test_a_module_that_extends_it_gives_the_container_one_bearer_authentication(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(jwt.PyJWKClient, "fetch_data", lambda _client: key_set_of(ISSUER_KEY))
+    properties = OAuth2Properties(issuer_uri=ISSUER, jwks_uri="http://keycloak/certs", audience=AUDIENCE)
+    container = wireup.create_sync_container(
+        injectables=[player_tokens, wireup.instance(properties, as_type=OAuth2Properties)]
+    )
+
+    authentication = container.get(BearerAuthentication)
+
+    assert isinstance(authentication, PlayerTokens)
+    assert authentication.authenticate(token()) == "ann"

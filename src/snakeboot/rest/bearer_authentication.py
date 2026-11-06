@@ -21,9 +21,11 @@ class BearerAuthentication(ABC):
     """
 
     @override
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    def __init_subclass__(cls, *, component: bool = True, **kwargs: Any) -> None:
+        """Registers a concrete subclass; `component=False` marks a base meant to be extended, such as
+        JwtBearerAuthentication, so a module that imports it to extend it does not hold two components."""
         super().__init_subclass__(**kwargs)
-        if not getattr(cls.authenticate, "__isabstractmethod__", False):
+        if component and not getattr(cls.authenticate, "__isabstractmethod__", False):
             injectable(cls, as_type=BearerAuthentication)
 
     @abstractmethod

@@ -15,14 +15,15 @@ KEY_LIFESPAN_SECONDS: Final = 300
 """How long the issuer's public keys are kept before they are fetched again (a key rotation takes at most this)."""
 
 
-class JwtBearerAuthentication(BearerAuthentication):
+class JwtBearerAuthentication(BearerAuthentication, component=False):
     """Accepts the signed JWT access tokens of one authorization server, like Spring's oauth2 resource server.
 
     A token is valid when the issuer's public key (fetched from `jwks_uri` and cached) verifies its signature, its
     `iss` is `issuer_uri`, its `aud` holds `audience` and it has not expired. The principal is its `sub`. Every other
     token, and every token while the keys cannot be fetched, is answered with 401.
 
-    An application turns it on with one adapter in its component scan and the table `[oauth2]` in application.toml:
+    It is not a component itself: an application turns it on with one subclass in its component scan and the table
+    `[oauth2]` in application.toml:
 
         class PlayerTokens(JwtBearerAuthentication):
             \"\"\"The access tokens that Keycloak gives the platform's players.\"\"\"
