@@ -7,7 +7,8 @@
     WIREUP = WireupSettings(injectables=[*ComponentScan.of(MyApplication).module_names()])
 
 Standard library only: it finds module names without importing them, so settings can use it
-before Django has started.
+before Django has started. Once Django has started, `classes_marked` and `methods_marked` find what
+decorators marked, like Spring's `MethodIntrospector`.
 """
 
 from snakeboot.component_scan.application_root import application_package, application_root
@@ -16,6 +17,7 @@ from snakeboot.component_scan.component_scan import (
     SNAKEBOOT_AUTO_CONFIGURATION,
     ComponentScan,
     InvalidApplicationRootError,
+    MarkedMethod,
 )
 
 __all__ = [
@@ -23,6 +25,7 @@ __all__ = [
     "SNAKEBOOT_AUTO_CONFIGURATION",
     "ComponentScan",
     "InvalidApplicationRootError",
+    "MarkedMethod",
     "application_package",
     "application_root",
 ]

@@ -1,8 +1,6 @@
-import importlib
 import inspect
 from collections.abc import Sequence
 from dataclasses import dataclass
-from types import ModuleType
 
 from ninja import NinjaAPI, Router
 
@@ -49,9 +47,8 @@ class ControllerScan:
 
     def add_to(self, api: NinjaAPI) -> ScannedControllers:
         """Adds one router per controller and the error answers of every advice to `api`."""
-        modules = [importlib.import_module(name) for name in self._component_scan.module_names()]
-        controllers = _classes_marked(CONTROLLER_MAPPING_ATTRIBUTE, modules)
-        advices = _classes_marked(ADVICE_MARKER_ATTRIBUTE, modules)
+        controllers = self._component_scan.classes_marked(CONTROLLER_MAPPING_ATTRIBUTE)
+        advices = self._component_scan.classes_marked(ADVICE_MARKER_ATTRIBUTE)
         endpoints_by_controller = {controller: self._endpoints_of(controller) for controller in controllers}
         self._refuse_ambiguous_routes([e for endpoints in endpoints_by_controller.values() for e in endpoints])
         for controller_class, endpoints in endpoints_by_controller.items():
@@ -117,15 +114,3 @@ class ControllerScan:
                 f"Ambiguous mapping: {error_type.__name__} is answered by {earlier} and {by}."
             )
         answered_by[error_type] = by
-
-
-def _classes_marked(marker: str, modules: Sequence[ModuleType]) -> list[type]:
-    # A class imported into another module is found once, where it is defined; sorted, so the routes are always
-    # registered in the same order.
-    found = {
-        f"{candidate.__module__}.{candidate.__qualname__}": candidate
-        for module in modules
-        for candidate in vars(module).values()
-        if isinstance(candidate, type) and marker in vars(candidate) and candidate.__module__ == module.__name__
-    }
-    return [found[name] for name in sorted(found)]

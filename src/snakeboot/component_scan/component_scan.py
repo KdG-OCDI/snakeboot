@@ -1,11 +1,14 @@
 import ast
+import importlib
 import importlib.util
+import inspect
 import pkgutil
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from dataclasses import dataclass
 from fnmatch import fnmatchcase
 from pathlib import Path
-from typing import Final
+from types import ModuleType
+from typing import Any, Final
 
 DJANGO_ENTRY_POINTS: Final = ("*.wsgi", "*.asgi", "*.migrations")
 """Modules every Django project has that are never components.
@@ -35,6 +38,24 @@ class InvalidApplicationRootError(TypeError):
 
 
 @dataclass(frozen=True, slots=True)
+class MarkedMethod[M]:
+    """A method that a decorator marked, the class it belongs to, and what the decorator recorded on it.
+
+    Spring finds `@RequestMapping`, `@RabbitListener` and `@Scheduled` methods with one helper,
+    `MethodIntrospector.selectMethods`; `ComponentScan.methods_marked` plays that part here.
+    """
+
+    owner: type
+    method: Callable[..., Any]
+    mapping: M
+
+    @property
+    def name(self) -> str:
+        """`module.Class.method`, for messages and a stable order."""
+        return f"{self.owner.__module__}.{self.owner.__qualname__}.{self.method.__name__}"
+
+
+@dataclass(frozen=True, slots=True)
 class ComponentScan:
     """Which modules make up the application, like `@ComponentScan(basePackages, excludeFilters)` in Spring.
 
@@ -49,7 +70,9 @@ class ComponentScan:
     `module_names()` lists plain modules only, never packages. Given a package, wireup
     imports every file below it itself, past any exclusion; given only modules, wireup and
     `ControllerScan` look exactly where this scan points. Finding the names
-    imports nothing, so settings can call it before Django has started.
+    imports nothing, so settings can call it before Django has started. `classes_marked` and
+    `methods_marked` do import the modules: they run once Django has started, to find what
+    decorators marked (controllers, listeners, scheduled methods).
     """
 
     base_packages: tuple[str, ...]
@@ -100,6 +123,34 @@ class ComponentScan:
             for declared in _classes_in(path, extending=base)
         )
 
+    def classes_marked(self, marker: str) -> list[type]:
+        """Imports the scanned modules and returns every class defined in them that carries `marker` itself.
+
+        The marker is an attribute a class decorator set; an inherited one does not count. A class imported into
+        another module is found once, where it is defined. Sorted by qualified name, so whatever is built from the
+        result is always built in the same order.
+        """
+        return [candidate for candidate in self._classes() if marker in vars(candidate)]
+
+    def methods_marked[M](self, marker: str, mapping_type: type[M]) -> list[MarkedMethod[M]]:
+        """Imports the scanned modules and returns every method of their classes that a decorator marked.
+
+        A method counts when its attribute `marker` holds a `mapping_type`, the record the decorator left.
+        Sorted by `module.Class.method`.
+        """
+        found = [
+            MarkedMethod(owner, method, mapping)
+            for owner in self._classes()
+            for _, method in inspect.getmembers(owner, inspect.isfunction)
+            if isinstance(mapping := getattr(method, marker, None), mapping_type)
+        ]
+        return sorted(found, key=lambda marked: marked.name)
+
+    def _classes(self) -> list[type]:
+        modules = [importlib.import_module(name) for name in self.module_names()]
+        found = {f"{owner.__module__}.{owner.__qualname__}": owner for owner in _classes_defined_in(modules)}
+        return [found[name] for name in sorted(found)]
+
     def _scanned_files(self) -> dict[str, Path]:
         files = {name: path for package in self.base_packages for name, path in self._modules_under(package)}
         return {name: path for name, path in files.items() if not self.is_excluded(name)}
@@ -134,6 +185,14 @@ class ComponentScan:
                 yield from self._modules_in_directory(directory / module.name, name)
             else:
                 yield name, directory / f"{module.name}.py"
+
+
+def _classes_defined_in(modules: list[ModuleType]) -> Iterator[type]:
+    # vars(module) also holds what the module imported; only what it defines counts.
+    for module in modules:
+        for candidate in vars(module).values():
+            if isinstance(candidate, type) and candidate.__module__ == module.__name__:
+                yield candidate
 
 
 def _classes_in(path: Path, *, extending: str) -> Iterator[str]:
