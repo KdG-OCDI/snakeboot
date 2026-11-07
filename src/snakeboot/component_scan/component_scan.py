@@ -18,11 +18,14 @@ during start-up would start Django a second time, which Django refuses. Migratio
 no components. These are conventions of Django, so the scan needs no Django import to know them.
 """
 
-SNAKEBOOT_AUTO_CONFIGURATION: Final = ("snakeboot.events.application_event_publisher_injectable",)
+SNAKEBOOT_AUTO_CONFIGURATION: Final = (
+    "snakeboot.events.application_event_publisher_injectable",
+    "snakeboot.lifecycle.application_lifecycle_injectable",
+)
 """Modules of snakeboot itself that register components, like Spring Boot's `@EnableAutoConfiguration`.
 
-Spring Boot always provides an `ApplicationEventPublisher`; so does snakeboot, through this
-module. The scan adds it to every application without the application naming it. The names
+Spring Boot always provides an `ApplicationEventPublisher` and a lifecycle; so does snakeboot, through
+these modules. The scan adds them to every application without the application naming them. The names
 are strings: the scan still imports nothing and depends on no other part of snakeboot.
 """
 

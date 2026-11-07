@@ -8,6 +8,7 @@ from snakeboot.component_scan import DJANGO_ENTRY_POINTS, SNAKEBOOT_AUTO_CONFIGU
 
 PROJECT = "tests.component_scan.sample_project"
 PUBLISHER = "snakeboot.events.application_event_publisher_injectable"
+LIFECYCLE = "snakeboot.lifecycle.application_lifecycle_injectable"
 
 
 def own_modules(scan: ComponentScan) -> list[str]:
@@ -76,9 +77,9 @@ def test_an_unknown_parent_package_stops_the_start_up_too() -> None:
         ComponentScan(("myapp.nonexistent",)).module_names()
 
 
-def test_the_scan_adds_the_publisher_snakeboot_provides_like_spring_boot_auto_configuration() -> None:
-    assert ComponentScan((PROJECT,)).auto_configuration == SNAKEBOOT_AUTO_CONFIGURATION == (PUBLISHER,)
-    assert PUBLISHER in ComponentScan((PROJECT,)).module_names()
+def test_the_scan_adds_what_snakeboot_provides_like_spring_boot_auto_configuration() -> None:
+    assert ComponentScan((PROJECT,)).auto_configuration == SNAKEBOOT_AUTO_CONFIGURATION == (PUBLISHER, LIFECYCLE)
+    assert {PUBLISHER, LIFECYCLE} <= set(ComponentScan((PROJECT,)).module_names())
 
 
 def test_an_exclusion_removes_an_auto_configured_module() -> None:

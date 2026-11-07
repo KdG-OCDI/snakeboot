@@ -83,6 +83,7 @@ name = "transaction knows no framework and no other part of snakeboot"
 type = "forbidden"
 source_modules = ["snakeboot.transaction"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "django",
     "ninja",
     "wireup",
@@ -104,6 +105,7 @@ name = "component_scan is standard library only, so settings can use it before D
 type = "forbidden"
 source_modules = ["snakeboot.component_scan"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "django",
     "ninja",
     "wireup",
@@ -125,6 +127,7 @@ name = "events knows wireup and transaction, but no web or ORM framework"
 type = "forbidden"
 source_modules = ["snakeboot.events"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "django",
     "ninja",
     "pydantic",
@@ -143,6 +146,7 @@ name = "rest knows Ninja, wireup and the component scan, but not the transaction
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "snakeboot.configuration",
     "snakeboot.transaction",
     "snakeboot.events",
@@ -158,6 +162,7 @@ name = "django adapts transaction to Django, nothing else"
 type = "forbidden"
 source_modules = ["snakeboot.django"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "ninja",
     "wireup",
     "snakeboot.configuration",
@@ -175,6 +180,7 @@ name = "testing helpers run without a framework"
 type = "forbidden"
 source_modules = ["snakeboot.testing"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "django",
     "ninja",
     "wireup",
@@ -194,6 +200,7 @@ name = "configuration knows Pydantic Settings and wireup, but no web or ORM fram
 type = "forbidden"
 source_modules = ["snakeboot.configuration"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "django",
     "ninja",
     "snakeboot.transaction",
@@ -208,7 +215,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "django_application starts the container, the configuration and the transactions on Django, and nothing else"
+name = "django_application starts the container, the configuration, the transactions and the lifecycle on Django, and nothing else"
 type = "forbidden"
 source_modules = ["snakeboot.django_application"]
 forbidden_modules = [
@@ -225,6 +232,7 @@ name = "openapi is standard library only, so an application class can use it bef
 type = "forbidden"
 source_modules = ["snakeboot.openapi"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "django",
     "ninja",
     "wireup",
@@ -247,11 +255,31 @@ name = "oauth2 knows the REST library, the configuration and PyJWT, but no ORM, 
 type = "forbidden"
 source_modules = ["snakeboot.oauth2"]
 forbidden_modules = [
+    "snakeboot.lifecycle",
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.testing",
+]
+
+[[tool.importlinter.contracts]]
+name = "lifecycle knows wireup and the event library, but no web or ORM framework"
+type = "forbidden"
+source_modules = ["snakeboot.lifecycle"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "pydantic",
+    "pydantic_settings",
+    "snakeboot.configuration",
+    "snakeboot.component_scan",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.django_application",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
 ]
 
 # ---------------------------------------------------------------------------
@@ -296,6 +324,11 @@ mypy_path = "src"
 explicit_package_bases = true
 enable_error_code = ["explicit-override", "ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
 plugins = ["mypy_django_plugin.main"]
+
+[[tool.mypy.overrides]]
+# asgiref.testing.ApplicationCommunicator, which drives an ASGI application in the lifespan tests, has no annotations.
+module = ["tests.lifecycle.test_lifecycle_asgi_application"]
+disallow_untyped_calls = false
 
 [tool.django-stubs]
 django_settings_module = "tests.django_settings"

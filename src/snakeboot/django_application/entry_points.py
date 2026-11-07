@@ -10,6 +10,10 @@ from django.core.handlers.asgi import ASGIHandler
 from django.core.handlers.wsgi import WSGIHandler
 from django.core.management import execute_from_command_line
 from django.core.wsgi import get_wsgi_application
+from wireup.integration.django import get_app_container
+
+from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
+from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
 
 APPLICATION_VARIABLE: Final = "SNAKEBOOT_APPLICATION"
 """The environment variable that names the application class; `run` and the two handlers below set it."""
@@ -29,18 +33,25 @@ def run(application: type, argv: Sequence[str] | None = None) -> None:
 
 
 def wsgi_application(application: type) -> WSGIHandler:
-    """Returns the WSGI handler of `application`, for gunicorn: `application = wsgi_application(MyApplication)`."""
+    """Returns the WSGI handler of `application`, for gunicorn: `application = wsgi_application(MyApplication)`.
+
+    WSGI has no moment "the server starts", so no lifecycle runs: an application with `@scheduled` or
+    `@rabbit_listener` methods uses `asgi_application`, or runs them apart with `run_lifecycle`.
+    """
     _start(application)
     return get_wsgi_application()
 
 
-def asgi_application(application: type) -> ASGIHandler:
-    """Returns the ASGI handler of `application`, for uvicorn: `application = asgi_application(MyApplication)`.
+def asgi_application(application: type) -> LifecycleAsgiApplication:
+    """Returns the ASGI application of `application`, for uvicorn: `application = asgi_application(MyApplication)`.
 
-    Under ASGI a response can stream from an async iterator, such as server-sent events, without holding a thread.
+    Django's handler serves the requests; around it, the application's lifecycle starts and stops with the server
+    (uvicorn's `lifespan`), so `@scheduled` and `@rabbit_listener` methods run while it serves. Under ASGI a response
+    can also stream from an async iterator, such as server-sent events, without holding a thread.
     """
     _start(application)
-    return get_asgi_application()
+    handler: ASGIHandler = get_asgi_application()
+    return LifecycleAsgiApplication(handler, lifecycle=_application_lifecycle)
 
 
 def application_named_in_environment() -> type:
@@ -54,6 +65,12 @@ def application_named_in_environment() -> type:
             "run(MyApplication), wsgi_application(MyApplication) or asgi_application(MyApplication)."
         )
     return application
+
+
+async def _application_lifecycle() -> ApplicationLifecycle:
+    # Asked for when the server starts: by then get_asgi_application() has set Django up, and wireup its container.
+    lifecycle: ApplicationLifecycle = await get_app_container().get(ApplicationLifecycle)
+    return lifecycle
 
 
 def _start(application: type) -> None:

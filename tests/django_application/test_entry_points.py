@@ -17,6 +17,7 @@ from snakeboot.django_application import (
     wsgi_application,
 )
 from snakeboot.django_application.entry_points import application_named_in_environment
+from snakeboot.lifecycle import LifecycleAsgiApplication
 from tests.django_application.service.applications import ServiceApplication
 
 SERVICE_APPLICATION = "tests.django_application.service.applications.ServiceApplication"
@@ -48,11 +49,16 @@ def test_wsgi_application_names_the_application_too(monkeypatch: pytest.MonkeyPa
     assert application_named_in_environment() is ServiceApplication
 
 
-def test_asgi_application_names_the_application_too(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_asgi_application_names_the_application_and_runs_the_lifecycle_around_django(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     handler = object()
     monkeypatch.setattr(entry_points, "get_asgi_application", lambda: handler)
 
-    assert asgi_application(ServiceApplication) is handler
+    application = asgi_application(ServiceApplication)
+
+    assert isinstance(application, LifecycleAsgiApplication)
+    assert application.handler is handler
     assert application_named_in_environment() is ServiceApplication
     assert os.environ["DJANGO_SETTINGS_MODULE"] == SETTINGS_MODULE
 
