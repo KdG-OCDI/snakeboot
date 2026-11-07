@@ -6,8 +6,8 @@ from pydantic import ValidationError
 from snakeboot.configuration import (
     CacheProperties,
     DatabaseProperties,
-    DjangoProperties,
     InvalidConfigurationPropertiesError,
+    ServerProperties,
     begin_configuration,
 )
 from tests.configuration.sample_service.greeting_properties import GreetingProperties
@@ -18,29 +18,29 @@ DJANGO_SECTIONS = (DatabaseProperties, CacheProperties)
 
 
 def test_the_first_step_leaves_the_tables_of_the_container_for_later() -> None:
-    configuration = begin_configuration(DjangoProperties, package=SAMPLE)  # application.toml also has [greeting]
+    configuration = begin_configuration(ServerProperties, package=SAMPLE)  # application.toml also has [greeting]
 
-    assert set(configuration.sections) == {DjangoProperties}
+    assert set(configuration.sections) == {ServerProperties}
 
 
 def test_the_second_step_reads_the_sections_of_the_container() -> None:
-    configuration = begin_configuration(DjangoProperties, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, package=SAMPLE)
 
     configuration.complete(GreetingProperties)
 
     assert configuration.get(GreetingProperties).text == "Hello"
-    assert configuration.get(DjangoProperties).debug is False
+    assert configuration.get(ServerProperties).debug is False
 
 
 def test_the_second_step_refuses_a_table_no_section_claims() -> None:
-    configuration = begin_configuration(DjangoProperties, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, package=SAMPLE)
 
     with pytest.raises(ValidationError, match="greeting"):
         configuration.complete()
 
 
 def test_the_second_step_is_taken_once() -> None:
-    configuration = begin_configuration(DjangoProperties, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, package=SAMPLE)
     configuration.complete(GreetingProperties)
 
     with pytest.raises(InvalidConfigurationPropertiesError, match="complete already"):
@@ -48,15 +48,15 @@ def test_the_second_step_is_taken_once() -> None:
 
 
 def test_a_section_known_from_the_first_step_may_be_named_again() -> None:
-    configuration = begin_configuration(DjangoProperties, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, package=SAMPLE)
 
-    configuration.complete(DjangoProperties, GreetingProperties)
+    configuration.complete(ServerProperties, GreetingProperties)
 
-    assert set(configuration.sections) == {DjangoProperties, GreetingProperties}
+    assert set(configuration.sections) == {ServerProperties, GreetingProperties}
 
 
 def test_an_optional_section_is_read_when_its_table_is_there() -> None:
-    configuration = begin_configuration(DjangoProperties, optional=DJANGO_SECTIONS, package=DJANGO_SERVICE)
+    configuration = begin_configuration(ServerProperties, optional=DJANGO_SECTIONS, package=DJANGO_SERVICE)
     configuration.complete()
 
     assert configuration.get(DatabaseProperties).host == "db"
@@ -64,7 +64,7 @@ def test_an_optional_section_is_read_when_its_table_is_there() -> None:
 
 
 def test_an_optional_section_without_a_table_is_absent() -> None:
-    configuration = begin_configuration(DjangoProperties, optional=DJANGO_SECTIONS, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, optional=DJANGO_SECTIONS, package=SAMPLE)
     configuration.complete(GreetingProperties)
 
     assert DatabaseProperties not in configuration.sections
@@ -76,4 +76,4 @@ def test_an_optional_table_that_is_only_partly_there_stops_the_start(monkeypatch
     monkeypatch.setenv("DATABASE__PASSWORD", "set-by-compose")  # the other keys of [database] are missing
 
     with pytest.raises(ValidationError, match=r"database\.host"):
-        begin_configuration(DjangoProperties, optional=DJANGO_SECTIONS, package=SAMPLE)
+        begin_configuration(ServerProperties, optional=DJANGO_SECTIONS, package=SAMPLE)

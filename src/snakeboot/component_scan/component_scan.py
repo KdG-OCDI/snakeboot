@@ -10,25 +10,25 @@ from pathlib import Path
 from types import ModuleType
 from typing import Any, Final
 
-DJANGO_ENTRY_POINTS: Final = ("*.wsgi", "*.asgi", "*.migrations")
-"""Modules every Django project has that are never components.
+DEFAULT_EXCLUDE: Final = ("*.wsgi", "*.asgi", "*.migrations")
+"""Modules an application has that are never components: its server entry points and its migrations.
 
-`wsgi.py` and `asgi.py` start Django when they are imported; a scan that imported them
-during start-up would start Django a second time, which Django refuses. Migrations hold
-no components. These are conventions of Django, so the scan needs no Django import to know them.
+`wsgi.py` and `asgi.py` start the application when they are imported; a scan that imported them
+during start-up would start it a second time. Migrations hold no components. These are conventions
+of Python's web servers and migration tools, so the scan needs to import nothing to know them.
 """
 
 SNAKEBOOT_AUTO_CONFIGURATION: Final = (
     "snakeboot.events.application_event_publisher_injectable",
     "snakeboot.lifecycle.application_lifecycle_injectable",
-    "snakeboot.django_application.background_work",
     "snakeboot.scheduling.task_scheduler_injectable",
 )
 """Modules of snakeboot itself that register components, like Spring Boot's `@EnableAutoConfiguration`.
 
 Spring Boot always provides an `ApplicationEventPublisher`, a lifecycle and a scheduler; so does snakeboot,
 through these modules. The scan adds them to every application without the application naming them. The names
-are strings: the scan still imports nothing and depends on no other part of snakeboot.
+are strings: the scan still imports nothing and depends on no other part of snakeboot. What the framework
+underneath adds, its binding adds itself.
 """
 
 APPLICATION_ROOT_ATTRIBUTE: Final = "__component_scan__"
@@ -66,7 +66,7 @@ class ComponentScan:
 
     Spring Boot scans from the package of the `@SpringBootApplication` class downwards and
     skips what is never a component through its default filters. Here the base packages are
-    named, `default_exclude` skips Django's entry points, and `exclude` adds the application's
+    named, `default_exclude` skips the server entry points and migrations, and `exclude` adds the application's
     own exclusions (rarely needed). `default_exclude=()` turns the defaults off, like Spring's
     `useDefaultFilters = false`. `auto_configuration` adds the modules through which snakeboot
     registers its own components; an exclusion pattern can remove one, `auto_configuration=()`
@@ -75,14 +75,14 @@ class ComponentScan:
     `module_names()` lists plain modules only, never packages. Given a package, wireup
     imports every file below it itself, past any exclusion; given only modules, wireup and
     `ControllerScan` look exactly where this scan points. Finding the names
-    imports nothing, so settings can call it before Django has started. `classes_marked` and
-    `methods_marked` do import the modules: they run once Django has started, to find what
-    decorators marked (controllers, listeners, scheduled methods).
+    imports nothing, so it works before the framework underneath has started. `classes_marked` and
+    `methods_marked` do import the modules: they run once it has started, to find what
+    decorators marked (controllers, listeners, scheduled methods, commands).
     """
 
     base_packages: tuple[str, ...]
     exclude: tuple[str, ...] = ()
-    default_exclude: tuple[str, ...] = DJANGO_ENTRY_POINTS
+    default_exclude: tuple[str, ...] = DEFAULT_EXCLUDE
     auto_configuration: tuple[str, ...] = SNAKEBOOT_AUTO_CONFIGURATION
 
     @classmethod
@@ -101,26 +101,12 @@ class ComponentScan:
         scanned = self._scanned_files().keys()
         return sorted({name for name in (*scanned, *self.auto_configuration) if not self.is_excluded(name)})
 
-    def app_configs(self) -> list[str]:
-        """Returns the dotted path of every Django `AppConfig` declared under the base packages, sorted.
-
-        Django takes such a path in INSTALLED_APPS. The scan reads the source and imports nothing, so settings can
-        call it before Django has started: a class counts when its base is written `AppConfig` or `apps.AppConfig`.
-        """
-        return self.classes_extending("AppConfig")
-
-    def models(self) -> list[str]:
-        """Returns the dotted path of every Django model declared under the base packages, sorted.
-
-        Read from the source like `app_configs`: a class counts when its base is written `Model` or `models.Model`.
-        """
-        return self.classes_extending("Model")
-
     def classes_extending(self, base: str) -> list[str]:
         """Returns the dotted path of every class under the base packages whose base is written `base`, sorted.
 
         `base` is a class name: `AppConfig` matches `class X(AppConfig)` and `class X(apps.AppConfig)`. Only the
-        source is read, so a subclass of a subclass of `base` does not count.
+        source is read, so this works before anything is imported, and a subclass of a subclass of `base` does not
+        count.
         """
         return sorted(
             f"{module_name}.{declared}"
@@ -201,7 +187,7 @@ def _classes_defined_in(modules: list[ModuleType]) -> Iterator[type]:
 
 
 def _classes_in(path: Path, *, extending: str) -> Iterator[str]:
-    # Only the source is read: importing a models.py before Django has started fails.
+    # Only the source is read: a module may need a framework that has not started yet.
     if path.suffix != ".py" or not path.is_file():
         return
     for node in ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body:

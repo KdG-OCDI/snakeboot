@@ -3,7 +3,7 @@
 import pytest
 
 from snakeboot.component_scan import (
-    DJANGO_ENTRY_POINTS,
+    DEFAULT_EXCLUDE,
     ComponentScan,
     InvalidApplicationRootError,
     application_package,
@@ -36,8 +36,8 @@ def test_the_scan_starts_in_the_package_of_the_marked_class() -> None:
     assert ComponentScan.of(BareApplication) == ComponentScan((THIS_PACKAGE,))
 
 
-def test_a_bare_application_root_skips_the_django_entry_points() -> None:
-    assert ComponentScan.of(BareApplication).default_exclude == DJANGO_ENTRY_POINTS
+def test_a_bare_application_root_skips_the_server_entry_points_and_the_migrations() -> None:
+    assert ComponentScan.of(BareApplication).default_exclude == DEFAULT_EXCLUDE
 
 
 def test_own_exclusions_come_on_top_of_the_defaults() -> None:

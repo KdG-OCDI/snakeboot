@@ -8,10 +8,10 @@ from snakeboot.configuration import (
     CacheProperties,
     Configuration,
     DatabaseProperties,
-    DjangoProperties,
     OAuth2Properties,
     RabbitProperties,
     SchedulingProperties,
+    ServerProperties,
     begin_configuration,
 )
 from snakeboot.django_application.django_configurer import configurers_in
@@ -20,7 +20,10 @@ from snakeboot.django_application.installed_apps import installed_apps, middlewa
 APPLICATION_SETTING: Final = "APPLICATION"
 """The setting that holds the class marked with `@application_root`, for the URLs and the tests."""
 
-URL_CONFIGURATION: Final = "snakeboot.rest.urls"
+URL_CONFIGURATION: Final = "snakeboot.django_ninja.urls"
+
+BACKGROUND_WORK_AUTO_CONFIGURATION: Final = "snakeboot.django_application.background_work"
+"""The module that gives the scheduler and the message listeners the container and fresh database connections."""
 
 RABBITMQ_AUTO_CONFIGURATION: Final = "snakeboot.rabbitmq.rabbitmq_injectable"
 """The module that brings RabbitMQ into the container, only when the application has `[rabbitmq]`: by name, so an
@@ -32,13 +35,14 @@ def django_settings(application: type) -> dict[str, Any]:
 
     Like Spring Boot's auto-configuration, the application writes no settings of its own:
 
-        SECRET_KEY, DEBUG, ALLOWED_HOSTS, LOGGING    from [django]
+        SECRET_KEY, DEBUG, ALLOWED_HOSTS, LOGGING    from [server]
         DATABASES                                    from [database], when the application has that table
         CACHES                                       from [cache], when the application has that table
         CONFIGURATION                                the sections read, completed when Django starts; [oauth2],
                                                      when there, for a JwtBearerAuthentication
-        WIREUP                                       the container: the modules of the component scan, and
-                                                     RabbitMQ's listeners and template when [rabbitmq] is there
+        WIREUP                                       the container: the modules of the component scan, what
+                                                     background threads need of Django, and RabbitMQ's listeners
+                                                     and template when [rabbitmq] is there
         INSTALLED_APPS                               snakeboot, wireup, every AppConfig, and what DjangoConfigurers add
         MIDDLEWARE                                   wireup's, what DjangoConfigurers add, then CommonMiddleware
         TEMPLATES, ROOT_URLCONF                      Swagger UI's templates and snakeboot's URLs
@@ -53,14 +57,14 @@ def django_settings(application: type) -> dict[str, Any]:
     scans = (component_scan, ComponentScan((application_package(application),), auto_configuration=()))
     configurers = configurers_in(scans)
     configuration = begin_configuration(
-        DjangoProperties,
+        ServerProperties,
         optional=(DatabaseProperties, CacheProperties, OAuth2Properties, RabbitProperties, SchedulingProperties),
         package=application_package(application),
     )
     return {
         APPLICATION_SETTING: application,
         CONFIGURATION_KEY: configuration,
-        **_django_values(configuration.get(DjangoProperties)),
+        **_server_values(configuration.get(ServerProperties)),
         **_infrastructure(configuration),
         "WIREUP": _container_of(configuration, component_scan),
         "INSTALLED_APPS": installed_apps(scans, configurers),
@@ -73,16 +77,16 @@ def django_settings(application: type) -> dict[str, Any]:
     }
 
 
-def _django_values(django: DjangoProperties) -> dict[str, Any]:
+def _server_values(server: ServerProperties) -> dict[str, Any]:
     return {
-        "SECRET_KEY": django.secret_key.get_secret_value(),
-        "DEBUG": django.debug,
-        "ALLOWED_HOSTS": list(django.allowed_hosts),
+        "SECRET_KEY": server.secret_key.get_secret_value(),
+        "DEBUG": server.debug,
+        "ALLOWED_HOSTS": list(server.allowed_hosts),
         "LOGGING": {
             "version": 1,
             "disable_existing_loggers": False,
             "handlers": {"console": {"class": "logging.StreamHandler"}},
-            "root": {"handlers": ["console"], "level": django.log_level},
+            "root": {"handlers": ["console"], "level": server.log_level},
             # pika reports every step of every connection at INFO; like Spring Boot's AMQP client, only problems.
             "loggers": {"pika": {"level": "WARNING"}},
         },
@@ -92,15 +96,36 @@ def _django_values(django: DjangoProperties) -> dict[str, Any]:
 def _infrastructure(configuration: Configuration) -> dict[str, Any]:
     values: dict[str, Any] = {}
     if DatabaseProperties in configuration.sections:
-        values["DATABASES"] = {"default": configuration.get(DatabaseProperties).as_django_database()}
+        values["DATABASES"] = {"default": django_database(configuration.get(DatabaseProperties))}
     if CacheProperties in configuration.sections:
-        values["CACHES"] = {"default": configuration.get(CacheProperties).as_django_cache()}
+        values["CACHES"] = {"default": django_cache(configuration.get(CacheProperties))}
     return values
+
+
+def django_database(database: DatabaseProperties) -> dict[str, str]:
+    """Returns the entry of Django's `DATABASES` setting for the section `[database]`."""
+    return {
+        "ENGINE": "django.db.backends.postgresql",
+        "HOST": database.host,
+        "PORT": str(database.port),
+        "NAME": database.name,
+        "USER": database.user,
+        "PASSWORD": database.password.get_secret_value(),
+    }
+
+
+def django_cache(cache: CacheProperties) -> dict[str, str]:
+    """Returns the entry of Django's `CACHES` setting for the section `[cache]`."""
+    return {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": cache.redis_url}
 
 
 def _container_of(configuration: Configuration, component_scan: ComponentScan) -> WireupSettings:
     # Django's own sections are declared in snakeboot, outside the scan: their modules join the container too.
-    modules = [*component_scan.module_names(), *(section.__module__ for section in configuration.sections)]
+    modules = [
+        *component_scan.module_names(),
+        *(section.__module__ for section in configuration.sections),
+        BACKGROUND_WORK_AUTO_CONFIGURATION,
+    ]
     if RabbitProperties in configuration.sections:
         modules.append(RABBITMQ_AUTO_CONFIGURATION)
     return WireupSettings(injectables=list(dict.fromkeys(modules)), auto_inject_views=False)

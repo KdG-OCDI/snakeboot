@@ -4,7 +4,7 @@ from typing import overload
 
 from snakeboot.component_scan.component_scan import (
     APPLICATION_ROOT_ATTRIBUTE,
-    DJANGO_ENTRY_POINTS,
+    DEFAULT_EXCLUDE,
     ComponentScan,
     InvalidApplicationRootError,
 )
@@ -19,7 +19,7 @@ def application_root[C: type](
     *,
     base_packages: tuple[str, ...] = (),
     exclude: tuple[str, ...] = (),
-    default_exclude: tuple[str, ...] = DJANGO_ENTRY_POINTS,
+    default_exclude: tuple[str, ...] = DEFAULT_EXCLUDE,
 ) -> Callable[[C], C]: ...
 
 
@@ -29,7 +29,7 @@ def application_root[C: type](
     *,
     base_packages: tuple[str, ...] = (),
     exclude: tuple[str, ...] = (),
-    default_exclude: tuple[str, ...] = DJANGO_ENTRY_POINTS,
+    default_exclude: tuple[str, ...] = DEFAULT_EXCLUDE,
 ) -> C | Callable[[C], C]:
     """Marks the root of the application, like Spring's `@SpringBootApplication`.
 

@@ -1,4 +1,4 @@
-[django]
+[server]
 debug = true
 
 [greeting.sender]

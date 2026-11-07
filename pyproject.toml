@@ -36,7 +36,7 @@ Changelog = "https://github.com/KdG-OCDI/snakeboot/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # DjangoAtomicTransactionManager (snakeboot.django).
 django = ["django>=6.1.1"]
-# Singleton REST controllers and advices on Django Ninja (snakeboot.rest).
+# Publishes the REST controllers and advices of snakeboot.rest on Django Ninja (snakeboot.django_ninja).
 ninja = ["django>=6.1.1", "django-ninja>=1.7.1"]
 # Typed configuration from application.toml, one profile and the environment (snakeboot.configuration).
 configuration = ["pydantic-settings>=2.16.0,<3"]
@@ -104,6 +104,9 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -129,6 +132,9 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -151,10 +157,13 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
-name = "rest knows Ninja, wireup and the component scan, but not the transaction and event libraries"
+name = "rest knows wireup and the component scan, but no web framework and no other library"
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [
@@ -166,10 +175,16 @@ forbidden_modules = [
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.django",
+    "django",
+    "ninja",
+    "snakeboot.openapi",
     "snakeboot.django_application",
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -191,6 +206,9 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -214,6 +232,9 @@ forbidden_modules = [
     "snakeboot.django_application",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -236,10 +257,13 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
-name = "django_application starts the container, the configuration, the transactions and the lifecycle on Django, and nothing else"
+name = "django_application starts the container, the configuration, the transactions, the lifecycle and the commands on Django, and nothing else"
 type = "forbidden"
 source_modules = ["snakeboot.django_application"]
 forbidden_modules = [
@@ -252,6 +276,8 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -278,10 +304,13 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
-name = "oauth2 knows the REST library, the configuration and PyJWT, but no ORM, transaction or event library"
+name = "oauth2 knows the REST library, the configuration and PyJWT, but no web framework, ORM, transaction or event library"
 type = "forbidden"
 source_modules = ["snakeboot.oauth2"]
 forbidden_modules = [
@@ -292,8 +321,13 @@ forbidden_modules = [
     "snakeboot.transaction",
     "snakeboot.events",
     "snakeboot.django",
+    "django",
+    "ninja",
     "snakeboot.django_application",
     "snakeboot.testing",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -315,6 +349,9 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -332,6 +369,9 @@ forbidden_modules = [
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
 ]
 
 [[tool.importlinter.contracts]]
@@ -345,6 +385,74 @@ forbidden_modules = [
     "snakeboot.django",
     "snakeboot.django_application",
     "snakeboot.scheduling",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
+    "snakeboot.django_ninja",
+    "snakeboot.command_line",
+    "snakeboot.boot",
+]
+
+[[tool.importlinter.contracts]]
+name = "django_ninja publishes the REST library on Django Ninja, and knows nothing else"
+type = "forbidden"
+source_modules = ["snakeboot.django_ninja"]
+forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
+    "snakeboot.scheduling",
+    "snakeboot.lifecycle",
+    "snakeboot.configuration",
+    "snakeboot.transaction",
+    "snakeboot.events",
+    "snakeboot.django",
+    "snakeboot.django_application",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
+    "snakeboot.command_line",
+    "snakeboot.boot",
+]
+
+[[tool.importlinter.contracts]]
+name = "command_line knows wireup and the component scan, but no framework and no other library"
+type = "forbidden"
+source_modules = ["snakeboot.command_line"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "pydantic",
+    "pydantic_settings",
+    "snakeboot.rabbitmq",
+    "pika",
+    "snakeboot.scheduling",
+    "snakeboot.lifecycle",
+    "snakeboot.configuration",
+    "snakeboot.transaction",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.django_ninja",
+    "snakeboot.django_application",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
+    "snakeboot.openapi",
+    "snakeboot.boot",
+]
+
+[[tool.importlinter.contracts]]
+name = "boot chooses the framework an application starts on: it knows django_application, and so nothing django_application may not know"
+type = "forbidden"
+source_modules = ["snakeboot.boot"]
+forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
+    "snakeboot.scheduling",
+    "ninja",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.django_ninja",
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",

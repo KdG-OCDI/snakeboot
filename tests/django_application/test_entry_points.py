@@ -1,4 +1,5 @@
-"""`run`, `wsgi_application` and `asgi_application` name the application and start it on snakeboot's settings."""
+"""`run`, `wsgi_application` and `asgi_application` name the application and start it on snakeboot's settings;
+`run` runs the application's own commands too."""
 
 import importlib
 import os
@@ -8,16 +9,25 @@ from types import ModuleType
 import pytest
 from django.core.exceptions import ImproperlyConfigured
 
+from snakeboot.command_line import InvalidCommandLineRunnerError
 from snakeboot.django_application import (
     APPLICATION_VARIABLE,
     SETTINGS_MODULE,
     asgi_application,
+    background_work,
     entry_points,
     run,
     wsgi_application,
 )
 from snakeboot.django_application.entry_points import application_named_in_environment
 from snakeboot.lifecycle import LifecycleAsgiApplication
+from tests.command_line.sample_commands.applications import (
+    AmbiguousCommandsApplication,
+    ApplicationWithoutCommands,
+    ClashingCommandsApplication,
+    CommandsApplication,
+)
+from tests.command_line.sample_commands.commands import GreetCommand, Journal
 from tests.django_application.service.applications import ServiceApplication
 
 SERVICE_APPLICATION = "tests.django_application.service.applications.ServiceApplication"
@@ -83,4 +93,87 @@ def test_the_settings_module_holds_the_settings_of_the_named_application(monkeyp
 
     assert settings.APPLICATION is ServiceApplication
     assert settings.SECRET_KEY == "test-only-secret"
-    assert settings.ROOT_URLCONF == "snakeboot.rest.urls"
+    assert settings.ROOT_URLCONF == "snakeboot.django_ninja.urls"
+
+
+class StartedContainer:
+    """Stands in for wireup's container of the started application: it builds what it is asked for."""
+
+    def __init__(self, journal: Journal) -> None:
+        self._journal = journal
+
+    def _synchronous_get(self, component_type: type) -> object:
+        return component_type(self._journal) if component_type is GreetCommand else component_type()
+
+
+@pytest.fixture
+def journal(monkeypatch: pytest.MonkeyPatch) -> Journal:
+    """Django has started already (pytest-django); the commands come from a stand-in container."""
+    journal = Journal()
+    monkeypatch.setattr(entry_points, "setup", lambda: None)
+    monkeypatch.setattr(background_work, "get_app_container", lambda: StartedContainer(journal))
+    return journal
+
+
+@pytest.fixture
+def django_commands(monkeypatch: pytest.MonkeyPatch) -> list[list[str]]:
+    commands: list[list[str]] = []
+    monkeypatch.setattr(entry_points, "execute_from_command_line", commands.append)
+    return commands
+
+
+def test_run_runs_the_command_line_runner_its_first_argument_names(
+    journal: Journal, django_commands: list[list[str]]
+) -> None:
+    run(CommandsApplication, ["manage.py", "greet", "--name", "Ann"])
+
+    assert journal.entries == ["Hallo Ann"]
+    assert django_commands == []
+
+
+def test_a_command_line_error_ends_the_process_with_status_1(journal: Journal) -> None:
+    with pytest.raises(SystemExit) as stopped:
+        run(CommandsApplication, ["manage.py", "refuse"])
+
+    assert stopped.value.code == 1
+
+
+def test_help_of_a_command_is_its_own_help(journal: Journal, capsys: pytest.CaptureFixture[str]) -> None:
+    with pytest.raises(SystemExit):
+        run(CommandsApplication, ["/srv/myapp/__main__.py", "help", "greet"])
+
+    assert capsys.readouterr().out.startswith("usage: python -m tests.command_line.sample_commands greet")
+
+
+def test_the_help_of_the_program_lists_the_commands_after_django_s(
+    journal: Journal, django_commands: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(CommandsApplication, ["manage.py"])
+
+    assert django_commands == [["manage.py"]]
+    assert "[application]\n    greet " in capsys.readouterr().out
+
+
+def test_a_command_nobody_knows_is_left_to_django(journal: Journal, django_commands: list[list[str]]) -> None:
+    run(CommandsApplication, ["manage.py", "nonsense"])
+
+    assert django_commands == [["manage.py", "nonsense"]]
+
+
+def test_an_application_without_commands_runs_django_s(
+    journal: Journal, django_commands: list[list[str]], capsys: pytest.CaptureFixture[str]
+) -> None:
+    run(ApplicationWithoutCommands, ["manage.py", "help"])
+
+    assert django_commands == [["manage.py", "help"]]
+    assert "[application]" not in capsys.readouterr().out
+
+
+def test_a_command_with_the_name_of_one_of_django_s_stops_the_start(journal: Journal) -> None:
+    with pytest.raises(ImproperlyConfigured, match="migrate: Django has a command of that name already"):
+        run(ClashingCommandsApplication, ["manage.py", "help"])
+
+
+def test_two_commands_of_one_name_stop_the_start(journal: Journal) -> None:
+    with pytest.raises(InvalidCommandLineRunnerError, match="Ambiguous command"):
+        run(AmbiguousCommandsApplication, ["manage.py", "train"])

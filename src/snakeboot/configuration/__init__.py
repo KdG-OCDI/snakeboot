@@ -7,12 +7,13 @@
 The values come from `application.toml` in the package, then `application-<profile>.toml` when
 SNAKEBOOT_PROFILE is set, then environment variables such as CHATBOT__MODEL; nothing else.
 
-A section is a component of the module that declares it, so it enters the container with that module. In a Django
-application, `snakeboot.django_application` reads every section, Django's own included; without Django,
+A section is a component of the module that declares it, so it enters the container with that module. When the
+application starts (`snakeboot.boot`), snakeboot reads every section, its own included; outside an application,
 `load_configuration(ChatbotProperties, package="myservice")` reads the sections it is given.
-`DjangoProperties`, `DatabaseProperties` and `CacheProperties` are the sections Django itself needs;
-`OAuth2Properties` names the authorization server whose tokens `snakeboot.oauth2` accepts; `SchedulingProperties`
-turns `@scheduled` methods off in a process; `RabbitProperties` names the broker of `snakeboot.rabbitmq`.
+`ServerProperties`, `DatabaseProperties` and `CacheProperties` are what the framework underneath needs, in no
+framework's terms; `OAuth2Properties` names the authorization server whose tokens `snakeboot.oauth2` accepts;
+`SchedulingProperties` turns `@scheduled` methods off in a process; `RabbitProperties` names the broker of
+`snakeboot.rabbitmq`.
 """
 
 from snakeboot.configuration.cache_properties import CacheProperties
@@ -24,13 +25,13 @@ from snakeboot.configuration.configuration_errors import (
 from snakeboot.configuration.configuration_properties import configuration_properties
 from snakeboot.configuration.configuration_sources import BASE_FILE, PROFILE_VARIABLE
 from snakeboot.configuration.database_properties import DatabaseProperties
-from snakeboot.configuration.django_properties import DjangoProperties
 from snakeboot.configuration.load_configuration import begin_configuration, load_configuration
 from snakeboot.configuration.oauth2_properties import OAuth2Properties
 from snakeboot.configuration.rabbitmq_properties import RabbitListenerProperties, RabbitProperties
 from snakeboot.configuration.scheduling_properties import SchedulingProperties
 from snakeboot.configuration.section import Section
 from snakeboot.configuration.section_prefix import sections_declared_in
+from snakeboot.configuration.server_properties import ServerProperties
 
 __all__ = [
     "BASE_FILE",
@@ -40,13 +41,13 @@ __all__ = [
     "Configuration",
     "ConfigurationFileNotFoundError",
     "DatabaseProperties",
-    "DjangoProperties",
     "InvalidConfigurationPropertiesError",
     "OAuth2Properties",
     "RabbitListenerProperties",
     "RabbitProperties",
     "SchedulingProperties",
     "Section",
+    "ServerProperties",
     "begin_configuration",
     "configuration_properties",
     "load_configuration",

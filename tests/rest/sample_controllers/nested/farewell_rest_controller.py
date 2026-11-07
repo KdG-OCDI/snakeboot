@@ -5,6 +5,6 @@ from snakeboot.rest import rest_controller, route
 class FarewellRestController:
     """Sample controller in a subpackage, without explicit tags."""
 
-    @route.get("/{name}", response=dict[str, str])
-    def say_goodbye(self, request, name: str) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    @route.get("/{name}")
+    def say_goodbye(self, name: str) -> dict[str, str]:
         return {"message": f"Tot ziens {name}"}

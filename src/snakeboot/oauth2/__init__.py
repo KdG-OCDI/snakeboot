@@ -6,8 +6,8 @@
     jwks_uri = "http://keycloak:8080/realms/kareldegames/protocol/openid-connect/certs"
     audience = "tictactoe"
 
-Like `spring-boot-starter-oauth2-resource-server`: every endpoint then needs a valid token, and
-`authenticated_principal(request)` is its subject. It knows the REST library, the configuration and PyJWT
+Like `spring-boot-starter-oauth2-resource-server`: every endpoint then needs a valid token, and the `name` of an
+endpoint's `Principal` is its subject. It knows the REST library, the configuration and PyJWT, but no web framework
 (extra: snakeboot[oauth2]).
 """
 

@@ -1,24 +1,25 @@
-"""The sections Django itself needs: `[django]`, `[database]` and `[cache]` become Django settings in one line each."""
+"""The sections `[database]` and `[cache]` become entries of Django's `DATABASES` and `CACHES`."""
 
 from snakeboot.configuration import (
     CacheProperties,
     Configuration,
     DatabaseProperties,
-    DjangoProperties,
+    ServerProperties,
     load_configuration,
 )
+from snakeboot.django_application.django_settings import django_cache, django_database
 
 DJANGO_SERVICE = "tests.configuration.django_service"
 
 
 def load_django_service() -> Configuration:
-    return load_configuration(DjangoProperties, DatabaseProperties, CacheProperties, package=DJANGO_SERVICE)
+    return load_configuration(ServerProperties, DatabaseProperties, CacheProperties, package=DJANGO_SERVICE)
 
 
 def test_the_database_section_is_an_entry_of_databases() -> None:
     database = load_django_service().get(DatabaseProperties)
 
-    assert database.as_django_database() == {
+    assert django_database(database) == {
         "ENGINE": "django.db.backends.postgresql",
         "HOST": "db",
         "PORT": "5432",
@@ -32,7 +33,7 @@ def test_the_database_section_is_an_entry_of_databases() -> None:
 def test_the_cache_section_is_an_entry_of_caches() -> None:
     cache = load_django_service().get(CacheProperties)
 
-    assert cache.as_django_cache() == {
+    assert django_cache(cache) == {
         "BACKEND": "django.core.cache.backends.redis.RedisCache",
         "LOCATION": "redis://redis:6379/1",
     }

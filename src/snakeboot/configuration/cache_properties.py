@@ -4,13 +4,9 @@ from snakeboot.configuration.section import Section
 
 @configuration_properties("cache")
 class CacheProperties(Section):
-    """The section `[cache]`: the Redis that backs Django's cache, like Spring Boot's `spring.data.redis.*`.
+    """The section `[cache]`: the Redis that backs the application's cache, like Spring Boot's `spring.data.redis.*`.
 
-    CACHES = {"default": CONFIGURATION.get(CacheProperties).as_django_cache()}
+    snakeboot hands it to the cache of the framework when the table is there.
     """
 
     redis_url: str
-
-    def as_django_cache(self) -> dict[str, str]:
-        """The entry of Django's `CACHES` setting."""
-        return {"BACKEND": "django.core.cache.backends.redis.RedisCache", "LOCATION": self.redis_url}

@@ -17,13 +17,14 @@ COMMON_MIDDLEWARE: Final = "django.middleware.common.CommonMiddleware"
 def installed_apps(scans: Sequence[ComponentScan], configurers: Sequence[type[DjangoConfigurer]]) -> list[str]:
     """Returns INSTALLED_APPS: snakeboot, wireup, every `AppConfig` of the scans, then what the configurers add.
 
-    The scans read the source and import nothing, so this works before Django has started. An app that a configurer
-    adds although a scan finds it, or a model outside every app, stops the start.
+    The scans read the source and import nothing, so this works before Django has started: a class counts as an
+    `AppConfig` or a model when its base is written `AppConfig` or `apps.AppConfig`, `Model` or `models.Model`. An app
+    that a configurer adds although a scan finds it, or a model outside every app, stops the start.
     """
-    found = list(dict.fromkeys(app for scan in scans for app in scan.app_configs()))
+    found = list(dict.fromkeys(app for scan in scans for app in scan.classes_extending("AppConfig")))
     added = {app: configurer for configurer in configurers for app in configurer.installed_apps}
     _refuse_apps_added_twice(found, added)
-    _refuse_models_outside_apps([model for scan in scans for model in scan.models()], found)
+    _refuse_models_outside_apps([model for scan in scans for model in scan.classes_extending("Model")], found)
     return [APPLICATION, WIREUP_APPLICATION, *found, *added]
 
 

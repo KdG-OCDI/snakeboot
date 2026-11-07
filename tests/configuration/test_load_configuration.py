@@ -9,7 +9,7 @@ from snakeboot.configuration import (
     PROFILE_VARIABLE,
     Configuration,
     ConfigurationFileNotFoundError,
-    DjangoProperties,
+    ServerProperties,
     load_configuration,
 )
 from tests.configuration.sample_service.greeting_properties import (
@@ -22,7 +22,7 @@ SAMPLE = "tests.configuration.sample_service"
 
 
 def load_sample() -> Configuration:
-    return load_configuration(DjangoProperties, GreetingProperties, package=SAMPLE)
+    return load_configuration(ServerProperties, GreetingProperties, package=SAMPLE)
 
 
 def load_greeting() -> GreetingProperties:
@@ -48,7 +48,7 @@ def test_a_profile_overrides_only_the_keys_it_names(monkeypatch: pytest.MonkeyPa
     configuration = load_sample()
 
     assert configuration.profile == "local"
-    assert configuration.get(DjangoProperties).debug is True
+    assert configuration.get(ServerProperties).debug is True
     assert configuration.get(GreetingProperties).sender.address == "dev@localhost"
     assert configuration.get(GreetingProperties).sender.name == "snakeboot"  # same table, kept from the base
 
@@ -106,12 +106,12 @@ def test_a_value_of_the_wrong_type_stops_the_start(monkeypatch: pytest.MonkeyPat
 
 def test_a_missing_value_stops_the_start() -> None:
     with pytest.raises(ValidationError, match="farewell"):
-        load_configuration(DjangoProperties, GreetingProperties, FarewellProperties, package=SAMPLE)
+        load_configuration(ServerProperties, GreetingProperties, FarewellProperties, package=SAMPLE)
 
 
 def test_a_table_no_section_claims_stops_the_start() -> None:
-    # application.toml has [django] and [greeting]; a table nobody reads is a typo or a forgotten section.
-    with pytest.raises(ValidationError, match="django"):
+    # application.toml has [server] and [greeting]; a table nobody reads is a typo or a forgotten section.
+    with pytest.raises(ValidationError, match="server"):
         load_configuration(GreetingProperties, package=SAMPLE)
 
 
@@ -155,10 +155,10 @@ def test_no_sections_is_a_valid_configuration() -> None:
 
 
 def test_the_secret_key_never_shows() -> None:
-    django = load_sample().get(DjangoProperties)
+    server = load_sample().get(ServerProperties)
 
-    assert "test-only-secret" not in repr(django)
-    assert django.secret_key.get_secret_value() == "test-only-secret"
+    assert "test-only-secret" not in repr(server)
+    assert server.secret_key.get_secret_value() == "test-only-secret"
 
 
 def test_a_section_cannot_be_changed_after_loading() -> None:

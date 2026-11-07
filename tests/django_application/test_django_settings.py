@@ -13,11 +13,12 @@ from snakeboot.configuration import (
     CONFIGURATION_KEY,
     Configuration,
     DatabaseProperties,
-    DjangoProperties,
     OAuth2Properties,
+    ServerProperties,
 )
 from snakeboot.django_application import APPLICATION, APPLICATION_SETTING, django_settings
 from snakeboot.django_application.container_sections import complete_configuration
+from snakeboot.django_application.django_settings import BACKGROUND_WORK_AUTO_CONFIGURATION
 from snakeboot.django_application.installed_apps import WIREUP_APPLICATION
 from tests.django_application.container.greeting_properties import GreetingProperties
 from tests.django_application.service.applications import (
@@ -40,7 +41,7 @@ def configuration_of(settings: dict[str, Any]) -> Configuration:
     return configuration
 
 
-def test_the_django_settings_come_from_the_django_table() -> None:
+def test_the_django_settings_come_from_the_server_table() -> None:
     settings = django_settings(ServiceApplication)
 
     assert settings["SECRET_KEY"] == "test-only-secret"
@@ -68,17 +69,18 @@ def test_the_settings_name_the_application_and_snakeboot_s_urls() -> None:
     settings = django_settings(ServiceApplication)
 
     assert settings[APPLICATION_SETTING] is ServiceApplication
-    assert settings["ROOT_URLCONF"] == "snakeboot.rest.urls"
+    assert settings["ROOT_URLCONF"] == "snakeboot.django_ninja.urls"
     assert (settings["USE_TZ"], settings["TIME_ZONE"]) == (True, "UTC")
 
 
-def test_the_container_holds_the_component_scan_and_the_django_sections_read() -> None:
+def test_the_container_holds_the_component_scan_the_sections_read_and_the_background_work() -> None:
     settings = django_settings(ServiceApplication)
 
     injectables = settings["WIREUP"].injectables
     assert "tests.django_application.container.greeting_properties" in injectables
-    assert DjangoProperties.__module__ in injectables
+    assert ServerProperties.__module__ in injectables
     assert DatabaseProperties.__module__ in injectables
+    assert BACKGROUND_WORK_AUTO_CONFIGURATION in injectables
     assert settings["WIREUP"].auto_inject_views is False
     assert settings["MIDDLEWARE"][0] == "wireup.integration.django.wireup_middleware"
 
@@ -113,7 +115,7 @@ def test_an_adapter_receives_its_section_from_the_container() -> None:
     )
 
     assert container.get(GreetingProperties) is configuration.get(GreetingProperties)
-    assert container.get(DjangoProperties) is configuration.get(DjangoProperties)
+    assert container.get(ServerProperties) is configuration.get(ServerProperties)
 
 
 def test_a_table_no_module_of_the_container_claims_stops_the_start() -> None:

@@ -1,4 +1,4 @@
-[django]
+[server]
 secret_key = "test-only-secret"
 debug = true
 allowed_hosts = ["*"]

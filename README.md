@@ -1,33 +1,42 @@
 # snakeboot
 
-Spring Boot ergonomics for hexagonal Python applications built with Django, Django Ninja and
-[wireup](https://github.com/maldoinc/wireup).
+Spring Boot ergonomics for hexagonal Python applications, wired by [wireup](https://github.com/maldoinc/wireup)
+and running on Django and Django Ninja underneath.
 
 snakeboot imitates the basics of Spring Boot, not Spring itself. Each part is a handful of small
 classes you can read in an afternoon, and none of them knows anything about your domain.
+
+An application speaks snakeboot, not Django: its entry points, controllers, commands, listeners and configuration
+import nothing of Django or Django Ninja, so snakeboot can bind another framework without changing them. Only the
+persistence adapters, which hold the models and queries of the ORM, and the tests that use Django's database, still
+see Django.
 
 | snakeboot | Spring Boot | Needs |
 |---|---|---|
 | `@transactional`, `after_commit` | `@Transactional`, `@TransactionalEventListener(AFTER_COMMIT)` | nothing |
 | `@application_root`, `ComponentScan` | `@SpringBootApplication`, `@ComponentScan` | nothing |
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
-| `@rest_controller`, `@route.get`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
+| `@rest_controller`, `@route.get(status=...)`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@ResponseStatus`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
+| `Principal` | `@AuthenticationPrincipal` | `snakeboot[ninja]` |
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
 | `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@ConfigurationPropertiesScan`, profiles | `snakeboot[configuration]` |
-| `DjangoProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
-| `run`, `wsgi_application`, `asgi_application`, `django_settings` | `SpringApplication.run`, auto-configuration | `snakeboot[configuration,django]` |
-| `DjangoConfigurer` | `WebMvcConfigurer` | `snakeboot[configuration,django]` |
+| `ServerProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
+| `snakeboot.boot`: `run`, `wsgi_application`, `asgi_application` | `SpringApplication.run`, auto-configuration | `snakeboot[configuration,django]` |
+| `CommandLineRunner`, `CommandLineError` | `CommandLineRunner`, Spring Shell's `@Command` | `snakeboot[configuration,django]` |
+| `DjangoConfigurer`, `django_settings` | `WebMvcConfigurer` | `snakeboot[configuration,django]` |
 | `BearerAuthentication` | a `SecurityFilterChain` bean | `snakeboot[ninja]` |
 | `JwtBearerAuthentication`, `OAuth2Properties` | `spring-boot-starter-oauth2-resource-server`, `spring.security.oauth2.resourceserver.jwt.*` | `snakeboot[oauth2]` |
 | `Lifecycle`, `ApplicationReadyEvent`, `run_lifecycle` | `SmartLifecycle`, `ApplicationReadyEvent`, an application without the web starter | wireup |
 | `@scheduled`, `SchedulingProperties` | `@Scheduled` | `snakeboot[configuration,django]` |
 | `@rabbit_listener`, `RabbitTemplate`, `RabbitProperties`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `spring.rabbitmq.*`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
-| `rest_api`, `snakeboot.rest.urls` | the REST API and `/health` of the application | `snakeboot[ninja]` |
+| `snakeboot.django_ninja` | the REST API and `/health` of the application, on Django Ninja | `snakeboot[ninja]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
 
 The transaction, component scan and testing packages import nothing but the standard library,
-so the application layer of a hexagonal application can use `@transactional` without importing Django.
+so the application layer of a hexagonal application can use `@transactional` without importing Django. The REST,
+command line, event and lifecycle packages add wireup, and no web framework: a controller or a command is a module
+that imports without Django.
 
 ## Install
 
@@ -40,8 +49,9 @@ uv add "snakeboot[configuration,django,ninja,rabbitmq]"   # with RabbitMQ
 
 **The application.** A class marked with `@application_root`, like `@SpringBootApplication`, is the application.
 Its component scan decides what goes into the container: the package of the class, or the packages `base_packages`
-names. The scan skips Django's entry points (`wsgi.py`, `asgi.py`, migrations) and adds the components snakeboot
-provides itself (the event publisher, the lifecycle, the scheduler). `run` starts it, like `SpringApplication.run`.
+names. The scan skips the server entry points (`wsgi.py`, `asgi.py`) and migrations, and adds the components snakeboot
+provides itself (the event publisher, the lifecycle, the scheduler). `run` starts it, like `SpringApplication.run`;
+the entry points import it from `snakeboot.boot`, which stays the same whatever framework runs underneath.
 
 ```python
 # myapp/myapp_application.py
@@ -51,9 +61,9 @@ class MyApplication: ...
 
 
 # manage.py and myapp/__main__.py               # myapp/wsgi.py, for gunicorn
-run(MyApplication)                               application = wsgi_application(MyApplication)
+from snakeboot.boot import run                   application = wsgi_application(MyApplication)
                                                  # myapp/asgi.py, for uvicorn (streaming, server-sent events)
-                                                 application = asgi_application(MyApplication)
+run(MyApplication)                               application = asgi_application(MyApplication)
 ```
 
 The application writes no settings.py and no urls.py: snakeboot owns Django's settings module and builds every
@@ -74,7 +84,7 @@ class ChatbotProperties(Section):
 ```
 
 **Django, configured.** `django_settings(MyApplication)` builds the settings, like Spring Boot's
-auto-configuration: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and `LOGGING` from `[django]`; `DATABASES` from
+auto-configuration: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and `LOGGING` from `[server]`; `DATABASES` from
 `[database]` (PostgreSQL) and `CACHES` from `[cache]` (Redis), when `application.toml` has those tables; the container
 (`WIREUP`) from the component scan; and `INSTALLED_APPS`: snakeboot, wireup and every Django `AppConfig` of the
 component scan. The scan finds them, and the models, by reading the source, so nothing is imported before Django
@@ -147,8 +157,11 @@ class ParticipantNotificationListener:
 ```
 
 **REST controllers.** Singleton classes with constructor injection. `ControllerScan` finds them in the modules of
-the component scan, the same modules that fill the container, and adds their routes to the API. Two endpoints for
-the same URL, or two answers for one error, stop the start-up.
+the component scan, the same modules that fill the container, and `snakeboot.django_ninja` publishes their routes.
+A controller sees no request: an endpoint takes what the call carries (path and query parameters, a body as a
+Pydantic model) and returns the body, whose type is its return annotation; `status=` sets the status of the answer,
+like `@ResponseStatus`. Two endpoints for the same URL, two answers for one error, or a method that takes `request`
+stop the start-up.
 
 ```python
 @rest_controller("/workshops", tags=["workshops"])
@@ -156,8 +169,11 @@ class WorkshopRestController:
     def __init__(self, enrollment: EnrollmentFacadePort) -> None:
         self._enrollment = enrollment
 
-    @route.get("/{workshop_id}", response=WorkshopViewDTO)
-    def get_workshop(self, request: HttpRequest, workshop_id: str) -> WorkshopViewDTO: ...
+    @route.get("/{workshop_id}")
+    def get_workshop(self, workshop_id: str) -> WorkshopViewDTO: ...
+
+    @route.post("", status=201)
+    def create_workshop(self, body: NewWorkshopDTO) -> WorkshopViewDTO: ...
 
 
 @rest_controller_advice
@@ -166,15 +182,14 @@ class EnrollmentRestErrorAdvice:
     def answer_not_found(self, error: Exception) -> dict[str, str]:
         return error_answer(error)  # {"code": "workshop_not_found", "detail": "..."}
 
-
-# what snakeboot.rest.urls does for the application
-ControllerScan(ComponentScan.of(MyApplication)).add_to(api)
 ```
 
 **Authentication.** An adapter that extends `BearerAuthentication` is a component of the container, like a
 `SecurityFilterChain` bean: its constructor receives sections and ports by type. With one in the component scan, every
-endpoint needs `Authorization: Bearer <token>`, the OpenAPI document says so, and `authenticated_principal(request)`
-returns whom the token belongs to. `/health` stays open; an endpoint opts out with `auth=None`.
+endpoint needs `Authorization: Bearer <token>`, the OpenAPI document says so, and a parameter of type `Principal`
+receives whom the token belongs to, like `@AuthenticationPrincipal`. `/health` stays open; an endpoint opts out with
+`public=True`. A public endpoint that asks for a `Principal`, or a `Principal` in an API without authentication,
+stops the start-up.
 
 ```python
 class KeycloakTokens(BearerAuthentication):
@@ -183,6 +198,12 @@ class KeycloakTokens(BearerAuthentication):
 
     @override
     def authenticate(self, token: str) -> str | None: ...  # the subject of a valid token, or None for 401
+
+
+# in a controller
+@route.post("/{workshop_id}/registrations", status=201)
+def register(self, workshop_id: str, participant: Principal) -> RegistrationDTO:
+    return self._enrollment.register(workshop_id, participant_id=participant.name)
 ```
 
 **Tokens of an authorization server.** For the JWT access tokens of Keycloak or another OAuth2 server, extend
@@ -213,6 +234,31 @@ server, until SIGTERM: a process that only listens and schedules, like Spring Bo
 class RegisterOnStartup:
     @event_listener(ApplicationReadyEvent)  # once, when the application has started
     def register(self, _event: ApplicationReadyEvent) -> None: ...
+```
+
+**Commands.** A subclass of `CommandLineRunner` that names its command is a command of the application, like a
+`CommandLineRunner` bean: a component whose constructor receives use cases and ports, with arguments declared as with
+argparse. `python -m myapp self_play --games 20` starts the application and runs it; `python -m myapp help` lists the
+commands next to the framework's own (`migrate`), and `help self_play` prints its help, which is its docstring. Unlike
+Spring Boot, which runs every runner at each start, the first argument chooses one, as with Spring Shell's `@Command`.
+A `CommandLineError` stops the command with its message and exit status 1; two commands of one name stop the start.
+
+```python
+class SelfPlayCommand(CommandLineRunner, command="self_play"):
+    """Lets the AI levels play each other and prints how strong each one is."""
+
+    def __init__(self, self_play: SelfPlayUseCase) -> None:
+        self._self_play = self_play
+
+    @override
+    def add_arguments(self, parser: ArgumentParser) -> None:
+        parser.add_argument("--games", type=int, default=20, help="Games per pairing.")
+
+    @override
+    def run(self, arguments: Namespace) -> None:
+        if arguments.games < 1:
+            raise CommandLineError("Play at least one game.")
+        print(self._self_play.execute(SelfPlayRequestDTO(games=arguments.games)))
 ```
 
 **Scheduled methods.** `@scheduled` on a method of a component runs it periodically, like `@Scheduled`: with a fixed
@@ -264,7 +310,10 @@ auto_startup = true
 ## Design rules
 
 * Imitate the basics, not all of Spring: no AOP, no cron, no message broker other than RabbitMQ.
-* Fail at start-up, not at the first request: a broken controller, listener, root or configuration stops the application.
+* Fail at start-up, not at the first request: a broken controller, command, listener, root or configuration stops the
+  application.
+* An application imports snakeboot, not the framework underneath: only the `django*` packages of snakeboot know Django
+  or Django Ninja, so another framework means another binding, not other applications.
 * Each package knows as little as possible; `uv run lint-imports` enforces it.
 
 ## Develop

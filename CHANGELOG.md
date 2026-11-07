@@ -3,6 +3,44 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.6,<0.7`.
 
+## Unreleased
+
+An application speaks snakeboot, not Django: its entry points, controllers, commands and configuration import
+nothing of Django or Django Ninja any more, so snakeboot can bind another framework without changing them.
+
+- `snakeboot.boot`: `run`, `wsgi_application` and `asgi_application`, where an application's entry points import
+  them from. `snakeboot.django_application` still has them, as the binding that `boot` hands over today.
+- `snakeboot.rest` knows no web framework. An endpoint takes no `request`: it takes path, query and body parameters,
+  and a parameter of type `Principal` for whom the token belongs to, like `@AuthenticationPrincipal`. The body is the
+  return annotation, `response=` only when it differs; `status=` sets the status of the answer, like
+  `@ResponseStatus`; `public=True` opens an endpoint, like `permitAll()`. A route takes no other option. A method that
+  takes `request`, a public endpoint that asks for a `Principal` and a `Principal` without a `BearerAuthentication`
+  stop the start.
+- `snakeboot.django_ninja`: the REST API on Django Ninja (`rest_api`, `url_patterns`, `NinjaEndpointFactory`), which
+  was part of `snakeboot.rest`. `ControllerScan(...).find()` returns the checked API without building anything.
+- `snakeboot.command_line`: `CommandLineRunner`, like Spring Boot's, with constructor injection and argparse.
+  `python -m myapp self_play --games 20` runs the one its first argument names; `help` lists them next to Django's
+  commands. `CommandLineError` stops a command with a message and status 1.
+- `snakeboot.configuration`: the table `[django]` is `[server]` (`ServerProperties`, environment `SERVER__*`), with
+  the same keys. `DatabaseProperties` and `CacheProperties` lost `as_django_database` and `as_django_cache`;
+  `snakeboot.django_application.django_settings` converts them.
+- `snakeboot.component_scan` knows no Django: `DJANGO_ENTRY_POINTS` is `DEFAULT_EXCLUDE`, and `app_configs()` and
+  `models()` are gone (`classes_extending("AppConfig")` finds what they found).
+
+Moving an application from 0.6:
+
+| 0.6 | now |
+|---|---|
+| `from snakeboot.django_application import run` (and `asgi_application`, `wsgi_application`) | `from snakeboot.boot import run` |
+| `def get_game(self, request: HttpRequest, game_id: str)` | `def get_game(self, game_id: str)` |
+| `authenticated_principal(request)` | a parameter `player: Principal`, then `player.name` |
+| `@route.get("/x", response=GameDTO)` with `-> GameDTO` | `@route.get("/x")` |
+| `@route.post("/x", response={201: MoveDTO})`, `return Status(201, move)` | `@route.post("/x", status=201)`, `return move` |
+| `@route.get("/x", auth=None)` | `@route.get("/x", public=True)` |
+| `class BodyDTO(ninja.Schema)` | `class BodyDTO(pydantic.BaseModel)` |
+| `class Command(BaseCommand)` with `@inject_app` and an `apps.py` for the commands | `class X(CommandLineRunner, command="...")`, no `apps.py` |
+| `[django]`, `DJANGO__SECRET_KEY`, `DjangoProperties` | `[server]`, `SERVER__SECRET_KEY`, `ServerProperties` |
+
 ## 0.6.0
 
 - `snakeboot.lifecycle`: components that start and stop with the server, like Spring's `SmartLifecycle`. A subclass

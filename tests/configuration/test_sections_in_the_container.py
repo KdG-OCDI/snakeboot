@@ -9,7 +9,7 @@ from wireup import injectable
 from snakeboot.configuration import (
     CONFIGURATION_KEY,
     Configuration,
-    DjangoProperties,
+    ServerProperties,
     begin_configuration,
     load_configuration,
     sections_declared_in,
@@ -31,7 +31,7 @@ class Greeter:
 
 @pytest.fixture
 def configuration() -> Configuration:
-    return load_configuration(DjangoProperties, GreetingProperties, package=SAMPLE)
+    return load_configuration(ServerProperties, GreetingProperties, package=SAMPLE)
 
 
 def container_with(configuration: Configuration) -> wireup.SyncContainer:
@@ -60,7 +60,7 @@ def test_a_section_that_was_not_read_is_not_there(configuration: Configuration) 
 
 
 def test_a_section_asked_for_before_the_second_step_is_not_read_yet() -> None:
-    configuration = begin_configuration(DjangoProperties, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, package=SAMPLE)
 
     with pytest.raises(LookupError, match="GreetingProperties is not read yet"):
         container_with(configuration).get(GreetingProperties)

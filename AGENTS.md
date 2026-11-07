@@ -9,8 +9,13 @@
 * Imitate the basics of Spring Boot, not Spring. A feature belongs here when two applications need it
   and it knows nothing of either application's domain.
 * Each package knows as little as possible. `transaction`, `component_scan` and `testing` use the standard
-  library only; `events` adds wireup; `rest` adds Django Ninja; `django` adapts `transaction` to Django.
+  library only; `events`, `rest` and `command_line` add wireup; `django_ninja` publishes `rest` on Django Ninja;
+  `django` adapts `transaction` to Django; `boot` names the framework an application starts on.
   The import-linter contracts in `pyproject.toml` enforce it.
+* An application imports snakeboot, never the framework underneath. Only the `django*` packages know Django or
+  Django Ninja; whatever an application writes (entry points, controllers, commands, listeners, sections) is in
+  snakeboot's terms, so a binding to another framework changes no application. `tests/test_without_a_web_framework.py`
+  checks it at run time.
 * Fail at start-up, not at the first request: a broken controller, advice, listener or root raises
   while the application starts.
 * Clean Code (Ruff and mypy strict enforce most of it): names that reveal intent, one level of

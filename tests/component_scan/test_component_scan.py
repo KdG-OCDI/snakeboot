@@ -4,14 +4,13 @@ import sys
 
 import pytest
 
-from snakeboot.component_scan import DJANGO_ENTRY_POINTS, SNAKEBOOT_AUTO_CONFIGURATION, ComponentScan
+from snakeboot.component_scan import DEFAULT_EXCLUDE, SNAKEBOOT_AUTO_CONFIGURATION, ComponentScan
 
 PROJECT = "tests.component_scan.sample_project"
 PUBLISHER = "snakeboot.events.application_event_publisher_injectable"
 LIFECYCLE = "snakeboot.lifecycle.application_lifecycle_injectable"
-BACKGROUND_WORK = "snakeboot.django_application.background_work"
 SCHEDULER = "snakeboot.scheduling.task_scheduler_injectable"
-AUTO_CONFIGURED = (PUBLISHER, LIFECYCLE, BACKGROUND_WORK, SCHEDULER)
+AUTO_CONFIGURED = (PUBLISHER, LIFECYCLE, SCHEDULER)
 
 
 def own_modules(scan: ComponentScan) -> list[str]:
@@ -27,7 +26,7 @@ def test_lists_every_plain_module_below_a_package_sorted_and_without_packages() 
     ]
 
 
-def test_by_default_the_scan_skips_the_entry_points_of_django() -> None:
+def test_by_default_the_scan_skips_the_server_entry_points_and_the_migrations() -> None:
     names = ComponentScan((PROJECT,)).module_names()
 
     assert f"{PROJECT}.wsgi" not in names
@@ -35,8 +34,8 @@ def test_by_default_the_scan_skips_the_entry_points_of_django() -> None:
     assert [name for name in names if ".migrations" in name] == []
 
 
-def test_the_defaults_are_the_django_entry_points() -> None:
-    assert ComponentScan((PROJECT,)).default_exclude == DJANGO_ENTRY_POINTS == ("*.wsgi", "*.asgi", "*.migrations")
+def test_the_defaults_are_the_server_entry_points_and_the_migrations() -> None:
+    assert ComponentScan((PROJECT,)).default_exclude == DEFAULT_EXCLUDE == ("*.wsgi", "*.asgi", "*.migrations")
 
 
 def test_the_defaults_can_be_turned_off() -> None:
@@ -100,26 +99,28 @@ def test_an_auto_configured_module_is_listed_once_even_when_scanned_as_well() ->
 DJANGO_PROJECT = "tests.component_scan.sample_django_project"
 
 
-def test_lists_the_app_configs_written_as_appconfig_or_apps_appconfig() -> None:
-    assert ComponentScan((DJANGO_PROJECT,)).app_configs() == [
+def test_lists_the_classes_whose_base_is_written_with_or_without_its_module() -> None:
+    assert ComponentScan((DJANGO_PROJECT,)).classes_extending("AppConfig") == [
         f"{DJANGO_PROJECT}.cli.apps.NotesCliConfig",
         f"{DJANGO_PROJECT}.persistence.apps.NotesPersistenceConfig",
     ]
 
 
-def test_lists_the_models() -> None:
-    assert ComponentScan((DJANGO_PROJECT,)).models() == [f"{DJANGO_PROJECT}.persistence.models.NoteOrmEntity"]
+def test_lists_only_the_classes_that_name_the_base_themselves() -> None:
+    assert ComponentScan((DJANGO_PROJECT,)).classes_extending("Model") == [
+        f"{DJANGO_PROJECT}.persistence.models.NoteOrmEntity"
+    ]
 
 
-def test_finding_app_configs_and_models_imports_nothing() -> None:
+def test_finding_the_classes_extending_a_base_imports_nothing() -> None:
     """The sample models.py raises when imported, as a real one would before Django has started."""
-    ComponentScan((DJANGO_PROJECT,)).models()
+    ComponentScan((DJANGO_PROJECT,)).classes_extending("Model")
 
     assert f"{DJANGO_PROJECT}.persistence.models" not in sys.modules
     assert f"{DJANGO_PROJECT}.persistence.apps" not in sys.modules
 
 
-def test_a_project_without_django_apps_has_none() -> None:
+def test_a_project_without_such_classes_has_none() -> None:
     scan = ComponentScan((PROJECT,))
 
-    assert (scan.app_configs(), scan.models()) == ([], [])
+    assert (scan.classes_extending("AppConfig"), scan.classes_extending("Model")) == ([], [])

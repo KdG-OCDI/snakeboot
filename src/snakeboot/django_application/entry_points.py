@@ -4,14 +4,18 @@ from collections.abc import Sequence
 from importlib import import_module
 from typing import Final
 
+from django import setup
 from django.core.asgi import get_asgi_application
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIHandler
 from django.core.handlers.wsgi import WSGIHandler
-from django.core.management import execute_from_command_line
+from django.core.management import execute_from_command_line, get_commands
 from django.core.wsgi import get_wsgi_application
 from wireup.integration.django import get_app_container
 
+from snakeboot.command_line import CommandLineRunner, command_line_runners, commands_help, run_command
+from snakeboot.component_scan import ComponentScan, application_package
+from snakeboot.django_application.background_work import DjangoApplicationComponents
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
 
@@ -22,14 +26,35 @@ SETTINGS_MODULE: Final = "snakeboot.django_application.settings"
 """The settings module of every snakeboot application: DJANGO_SETTINGS_MODULE names it."""
 
 
-def run(application: type, argv: Sequence[str] | None = None) -> None:
-    """Runs a Django command of `application`, like Spring Boot's `SpringApplication.run(MyApplication.class)`.
+HELP: Final = ("help", "--help", "-h")
+"""What asks for the help of the program; the help then lists the commands of the application too."""
 
-    The entry point of manage.py and of `python -m <package>`: `run(MyApplication)` runs `sys.argv`, so
-    `python -m myapp migrate` migrates and `python manage.py runserver` serves.
+
+def run(application: type, argv: Sequence[str] | None = None) -> None:
+    """Runs a command of `application`, like Spring Boot's `SpringApplication.run(MyApplication.class)`.
+
+    The entry point of manage.py and of `python -m <package>`: `run(MyApplication)` runs `sys.argv`. A
+    `CommandLineRunner` of the component scan runs when the first argument names it (`python -m myapp self_play
+    --games 20`, or `help self_play` for its help); every other command is Django's, so `python -m myapp migrate`
+    migrates and `python manage.py runserver` serves. A command exits with status 1 on a `CommandLineError`.
     """
+    arguments = list(argv) if argv is not None else list(sys.argv)
     _start(application)
-    execute_from_command_line(list(argv) if argv is not None else sys.argv)
+    command, command_arguments = _requested_command(arguments)
+    if command in get_commands():
+        execute_from_command_line(arguments)  # as Django starts its own commands, runserver's autoreload included
+        return
+    setup()
+    runners = _command_line_runners_of(application)
+    runner = runners.get(command)
+    if runner is None:
+        execute_from_command_line(arguments)  # help, version, or a command nobody knows: Django answers
+        if command in HELP:
+            sys.stdout.write(commands_help(runners))
+        return
+    program = _program_of(application, arguments[0])
+    if exit_status := run_command(DjangoApplicationComponents().get(runner), command_arguments, program=program):
+        sys.exit(exit_status)
 
 
 def wsgi_application(application: type) -> WSGIHandler:
@@ -71,6 +96,29 @@ async def _application_lifecycle() -> ApplicationLifecycle:
     # Asked for when the server starts: by then get_asgi_application() has set Django up, and wireup its container.
     lifecycle: ApplicationLifecycle = await get_app_container().get(ApplicationLifecycle)
     return lifecycle
+
+
+def _requested_command(arguments: Sequence[str]) -> tuple[str, list[str]]:
+    # `help self_play` asks for what `self_play --help` prints.
+    command, *rest = arguments[1:] or ["help"]
+    if command == "help" and rest:
+        return rest[0], ["--help"]
+    return command, rest
+
+
+def _command_line_runners_of(application: type) -> dict[str, type[CommandLineRunner]]:
+    runners = command_line_runners(ComponentScan.of(application))
+    if clashing := sorted(set(runners) & set(get_commands())):
+        raise ImproperlyConfigured(
+            f"{', '.join(clashing)}: Django has a command of that name already; name the CommandLineRunner otherwise."
+        )
+    return runners
+
+
+def _program_of(application: type, script: str) -> str:
+    # `python -m myapp` runs myapp/__main__.py: say so in the help, as Django does for `python -m django`.
+    name = os.path.basename(script)
+    return f"python -m {application_package(application)}" if name == "__main__.py" else name
 
 
 def _start(application: type) -> None:

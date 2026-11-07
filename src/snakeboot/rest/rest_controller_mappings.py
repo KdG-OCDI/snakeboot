@@ -1,7 +1,9 @@
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from typing import Any, Final
+
+from snakeboot.rest.endpoint_signature import EndpointSignature
 
 CONTROLLER_MAPPING_ATTRIBUTE: Final = "__rest_controller_mapping__"
 ROUTE_MAPPING_ATTRIBUTE: Final = "__rest_route_mapping__"
@@ -21,14 +23,18 @@ class ControllerMapping:
 
 @dataclass(frozen=True, slots=True)
 class RouteMapping:
-    """What `@route.get(...)` and friends record on a method: HTTP method, path and Ninja options.
+    """What `@route.get(...)` and friends record on a method: the HTTP method, the path and how it answers.
 
-    The options are passed to Ninja unchanged (`response`, `auth`, `summary`, ...).
+    `response` is the type of the body when it differs from the return annotation (None: take the annotation),
+    `status` the status of a successful answer, and `public` whether the endpoint answers without authentication.
+    Nothing here names a web framework, so any binding can publish the route.
     """
 
     http_method: str
     path: str
-    options: dict[str, Any] = field(default_factory=dict)
+    response: Any = None
+    status: int = 200
+    public: bool = False
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,12 +47,13 @@ class ExceptionHandlerMapping:
 
 @dataclass(frozen=True, slots=True)
 class DeclaredEndpoint:
-    """One `@route` method of one controller, as the mounter is about to publish it."""
+    """One `@route` method of one controller, read and checked, as a binding is about to publish it."""
 
     controller_class: type
     method: Callable[..., Any]
     prefix: str
     route_mapping: RouteMapping
+    signature: EndpointSignature
 
     @property
     def name(self) -> str:
@@ -62,3 +69,17 @@ class DeclaredEndpoint:
         """
         segments = [segment for segment in f"{self.prefix}/{self.route_mapping.path}".split("/") if segment]
         return self.route_mapping.http_method, _PATH_PARAMETER.sub("{}", "/" + "/".join(segments))
+
+
+@dataclass(frozen=True, slots=True)
+class DeclaredErrorHandler:
+    """One `@exception_handler` method of one advice: the method that builds the body, and what it answers."""
+
+    advice_class: type
+    method: Callable[..., Any]
+    mapping: ExceptionHandlerMapping
+
+    @property
+    def name(self) -> str:
+        """`Advice.method`, for error messages."""
+        return f"{self.advice_class.__name__}.{self.method.__name__}"
