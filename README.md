@@ -211,7 +211,7 @@ server, until SIGTERM: a process that only listens and schedules, like Spring Bo
 ```python
 @application_event_listener
 class RegisterOnStartup:
-    @event_listener(ApplicationReadyEvent)            # once, when the application has started
+    @event_listener(ApplicationReadyEvent)  # once, when the application has started
     def register(self, _event: ApplicationReadyEvent) -> None: ...
 ```
 
@@ -243,7 +243,7 @@ class GameStartedListener:
         self._start_game = start_game
 
     @rabbit_listener(queue="tictactoe.game-started", exchange="games", routing_key="game.tictactoe.started")
-    def on_game_started(self, message: GameStartedMessage) -> None: ...   # a pydantic model
+    def on_game_started(self, message: GameStartedMessage) -> None: ...  # a pydantic model
 
 
 # an adapter that sends
