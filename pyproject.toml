@@ -83,6 +83,7 @@ name = "transaction knows no framework and no other part of snakeboot"
 type = "forbidden"
 source_modules = ["snakeboot.transaction"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
     "ninja",
@@ -105,6 +106,7 @@ name = "component_scan is standard library only, so settings can use it before D
 type = "forbidden"
 source_modules = ["snakeboot.component_scan"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
     "ninja",
@@ -127,6 +129,7 @@ name = "events knows wireup and transaction, but no web or ORM framework"
 type = "forbidden"
 source_modules = ["snakeboot.events"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
     "ninja",
@@ -146,6 +149,7 @@ name = "rest knows Ninja, wireup and the component scan, but not the transaction
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "snakeboot.configuration",
     "snakeboot.transaction",
@@ -162,6 +166,7 @@ name = "django adapts transaction to Django, nothing else"
 type = "forbidden"
 source_modules = ["snakeboot.django"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "ninja",
     "wireup",
@@ -180,6 +185,7 @@ name = "testing helpers run without a framework"
 type = "forbidden"
 source_modules = ["snakeboot.testing"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
     "ninja",
@@ -200,6 +206,7 @@ name = "configuration knows Pydantic Settings and wireup, but no web or ORM fram
 type = "forbidden"
 source_modules = ["snakeboot.configuration"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
     "ninja",
@@ -219,6 +226,7 @@ name = "django_application starts the container, the configuration, the transact
 type = "forbidden"
 source_modules = ["snakeboot.django_application"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "ninja",
     "snakeboot.events",
     "snakeboot.rest",
@@ -232,6 +240,7 @@ name = "openapi is standard library only, so an application class can use it bef
 type = "forbidden"
 source_modules = ["snakeboot.openapi"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
     "ninja",
@@ -255,6 +264,7 @@ name = "oauth2 knows the REST library, the configuration and PyJWT, but no ORM, 
 type = "forbidden"
 source_modules = ["snakeboot.oauth2"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "snakeboot.transaction",
     "snakeboot.events",
@@ -264,16 +274,31 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "lifecycle knows wireup and the event library, but no web or ORM framework"
+name = "lifecycle knows wireup, the event library and the component scan, but no web or ORM framework"
 type = "forbidden"
 source_modules = ["snakeboot.lifecycle"]
 forbidden_modules = [
+    "snakeboot.scheduling",
     "django",
     "ninja",
     "pydantic",
     "pydantic_settings",
     "snakeboot.configuration",
-    "snakeboot.component_scan",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.django_application",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
+]
+
+[[tool.importlinter.contracts]]
+name = "scheduling knows wireup, the lifecycle and the configuration, but no web or ORM framework"
+type = "forbidden"
+source_modules = ["snakeboot.scheduling"]
+forbidden_modules = [
+    "django",
+    "ninja",
     "snakeboot.rest",
     "snakeboot.django",
     "snakeboot.django_application",

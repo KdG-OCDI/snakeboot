@@ -21,11 +21,13 @@ no components. These are conventions of Django, so the scan needs no Django impo
 SNAKEBOOT_AUTO_CONFIGURATION: Final = (
     "snakeboot.events.application_event_publisher_injectable",
     "snakeboot.lifecycle.application_lifecycle_injectable",
+    "snakeboot.django_application.background_work",
+    "snakeboot.scheduling.task_scheduler_injectable",
 )
 """Modules of snakeboot itself that register components, like Spring Boot's `@EnableAutoConfiguration`.
 
-Spring Boot always provides an `ApplicationEventPublisher` and a lifecycle; so does snakeboot, through
-these modules. The scan adds them to every application without the application naming them. The names
+Spring Boot always provides an `ApplicationEventPublisher`, a lifecycle and a scheduler; so does snakeboot,
+through these modules. The scan adds them to every application without the application naming them. The names
 are strings: the scan still imports nothing and depends on no other part of snakeboot.
 """
 

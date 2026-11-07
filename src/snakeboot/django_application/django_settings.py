@@ -10,6 +10,7 @@ from snakeboot.configuration import (
     DatabaseProperties,
     DjangoProperties,
     OAuth2Properties,
+    SchedulingProperties,
     begin_configuration,
 )
 from snakeboot.django_application.django_configurer import configurers_in
@@ -47,7 +48,7 @@ def django_settings(application: type) -> dict[str, Any]:
     configurers = configurers_in(scans)
     configuration = begin_configuration(
         DjangoProperties,
-        optional=(DatabaseProperties, CacheProperties, OAuth2Properties),
+        optional=(DatabaseProperties, CacheProperties, OAuth2Properties, SchedulingProperties),
         package=application_package(application),
     )
     return {

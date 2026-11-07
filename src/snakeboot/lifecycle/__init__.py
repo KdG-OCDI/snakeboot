@@ -16,9 +16,18 @@ The lifecycle runs when an ASGI server starts the application (`asgi_application
 the tests start nothing. `@scheduled` methods and `@rabbit_listener` methods run through it.
 """
 
+from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 from snakeboot.lifecycle.application_ready_event import ApplicationReadyEvent
 from snakeboot.lifecycle.lifecycle import Lifecycle
 from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
+from snakeboot.lifecycle.task_decorator import TaskDecorator
 
-__all__ = ["ApplicationLifecycle", "ApplicationReadyEvent", "Lifecycle", "LifecycleAsgiApplication"]
+__all__ = [
+    "ApplicationComponents",
+    "ApplicationLifecycle",
+    "ApplicationReadyEvent",
+    "Lifecycle",
+    "LifecycleAsgiApplication",
+    "TaskDecorator",
+]
