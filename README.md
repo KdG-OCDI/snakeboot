@@ -19,6 +19,9 @@ classes you can read in an afternoon, and none of them knows anything about your
 | `DjangoConfigurer` | `WebMvcConfigurer` | `snakeboot[configuration,django]` |
 | `BearerAuthentication` | a `SecurityFilterChain` bean | `snakeboot[ninja]` |
 | `JwtBearerAuthentication`, `OAuth2Properties` | `spring-boot-starter-oauth2-resource-server`, `spring.security.oauth2.resourceserver.jwt.*` | `snakeboot[oauth2]` |
+| `Lifecycle`, `ApplicationReadyEvent`, `run_lifecycle` | `SmartLifecycle`, `ApplicationReadyEvent`, an application without the web starter | wireup |
+| `@scheduled`, `SchedulingProperties` | `@Scheduled` | `snakeboot[configuration,django]` |
+| `@rabbit_listener`, `RabbitTemplate`, `RabbitProperties`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `spring.rabbitmq.*`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
 | `rest_api`, `snakeboot.rest.urls` | the REST API and `/health` of the application | `snakeboot[ninja]` |
 | `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
@@ -30,6 +33,7 @@ so the application layer of a hexagonal application can use `@transactional` wit
 
 ```bash
 uv add "snakeboot[configuration,django,ninja]"
+uv add "snakeboot[configuration,django,ninja,rabbitmq]"   # with RabbitMQ
 ```
 
 ## A tour
@@ -37,7 +41,7 @@ uv add "snakeboot[configuration,django,ninja]"
 **The application.** A class marked with `@application_root`, like `@SpringBootApplication`, is the application.
 Its component scan decides what goes into the container: the package of the class, or the packages `base_packages`
 names. The scan skips Django's entry points (`wsgi.py`, `asgi.py`, migrations) and adds the components snakeboot
-provides itself (the event publisher). `run` starts it, like `SpringApplication.run`.
+provides itself (the event publisher, the lifecycle, the scheduler). `run` starts it, like `SpringApplication.run`.
 
 ```python
 # myapp/myapp_application.py
@@ -198,9 +202,68 @@ jwks_uri = "http://keycloak:8080/realms/kareldegames/protocol/openid-connect/cer
 audience = "tictactoe"                                     # the `aud` the tokens must hold
 ```
 
+**What runs beside the requests.** Django knows no moment "the server starts"; uvicorn does, and says so with ASGI's
+`lifespan`, which `asgi_application` answers. Then every `Lifecycle` component starts, like a `SmartLifecycle` bean,
+and `ApplicationReadyEvent` goes to the event listeners; when uvicorn stops, they stop. Management commands
+(`migrate`), WSGI and the tests start nothing. `python -m myapp run_lifecycle` runs the same lifecycle without a web
+server, until SIGTERM: a process that only listens and schedules, like Spring Boot without the web starter.
+
+```python
+@application_event_listener
+class RegisterOnStartup:
+    @event_listener(ApplicationReadyEvent)            # once, when the application has started
+    def register(self, _event: ApplicationReadyEvent) -> None: ...
+```
+
+**Scheduled methods.** `@scheduled` on a method of a component runs it periodically, like `@Scheduled`: with a fixed
+rate or a fixed delay, on one thread, each run between fresh database connections. A method that raises is logged and
+runs again at its next turn. `[scheduling] auto_startup = false` keeps a process from running them.
+
+```python
+@injectable
+class AbortExpiredGamesJob:
+    @scheduled(fixed_delay=timedelta(seconds=2))
+    def abort_expired_games(self) -> None: ...
+```
+
+**RabbitMQ.** With the table `[rabbitmq]` (extra `snakeboot[rabbitmq]`, through pika), `@rabbit_listener` makes a
+method of a component consume a queue, like `@RabbitListener` with `@QueueBinding`: the durable topic exchange, the
+queue and the binding are declared at start-up, the JSON body becomes the pydantic model, `dict` or `bytes` the method
+takes, and each listener has a thread and a connection of its own. Returning acknowledges the message;
+`RejectAndDontRequeueError` or an unreadable body refuses it for good; another failure is tried three times, a second
+apart, then refused, as Spring Boot's `retry.enabled` does. The `RabbitTemplate` sends persistent JSON, confirmed by the
+broker. `[rabbitmq.listener] auto_startup = false` keeps a process from consuming. Under uvicorn every worker process
+runs its own listeners and scheduled methods, like Spring's `concurrency`: RabbitMQ gives each message to one of them,
+and a scheduled method runs once per process.
+
+```python
+@injectable
+class GameStartedListener:
+    def __init__(self, start_game: StartGameUseCase) -> None:
+        self._start_game = start_game
+
+    @rabbit_listener(queue="tictactoe.game-started", exchange="games", routing_key="game.tictactoe.started")
+    def on_game_started(self, message: GameStartedMessage) -> None: ...   # a pydantic model
+
+
+# an adapter that sends
+self._rabbit.convert_and_send("games", "game.tictactoe.finished", event, message_id=f"{game_id}.finished")
+```
+
+```toml
+[rabbitmq]
+host = "rabbitmq"
+port = 5672
+username = "guest"          # the password comes from RABBITMQ__PASSWORD
+virtual_host = "/"
+
+[rabbitmq.listener]
+auto_startup = true
+```
+
 ## Design rules
 
-* Imitate the basics, not all of Spring: no AOP, no scheduling, no message brokers.
+* Imitate the basics, not all of Spring: no AOP, no cron, no message broker other than RabbitMQ.
 * Fail at start-up, not at the first request: a broken controller, listener, root or configuration stops the application.
 * Each package knows as little as possible; `uv run lint-imports` enforces it.
 

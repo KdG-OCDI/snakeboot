@@ -83,6 +83,8 @@ def _django_values(django: DjangoProperties) -> dict[str, Any]:
             "disable_existing_loggers": False,
             "handlers": {"console": {"class": "logging.StreamHandler"}},
             "root": {"handlers": ["console"], "level": django.log_level},
+            # pika reports every step of every connection at INFO; like Spring Boot's AMQP client, only problems.
+            "loggers": {"pika": {"level": "WARNING"}},
         },
     }
 

@@ -1,7 +1,28 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.5,<0.6`.
+a minor release may break the API: pin `snakeboot>=0.6,<0.7`.
+
+## 0.6.0
+
+- `snakeboot.lifecycle`: components that start and stop with the server, like Spring's `SmartLifecycle`. A subclass
+  of `Lifecycle` is a component; `ApplicationLifecycle` starts every one in phase order and stops them in reverse,
+  then publishes `ApplicationReadyEvent` to the event listeners. A listener of that event that raises stops the
+  start-up, as in Spring Boot.
+- `snakeboot.django_application`: `asgi_application` answers uvicorn's `lifespan`, which Django's handler refuses, and
+  runs the lifecycle around Django's handler; it returns a `LifecycleAsgiApplication` instead of Django's
+  `ASGIHandler`. `python -m myapp run_lifecycle` runs the lifecycle without a web server until SIGTERM or SIGINT.
+  Threads outside a request get their components and fresh database connections from `background_work`.
+- `snakeboot.scheduling`: `@scheduled(fixed_rate=..., fixed_delay=..., initial_delay=...)`, like `@Scheduled`, on one
+  thread. `[scheduling] auto_startup = false` (`SchedulingProperties`) keeps a process from running them.
+- `snakeboot.rabbitmq` (extra `rabbitmq`): `@rabbit_listener` and `RabbitTemplate` on RabbitMQ through pika, like
+  Spring AMQP, with the section `[rabbitmq]` (`RabbitProperties`); only an application with that section gets them.
+  A listener declares its exchange, queue and binding, converts the JSON body, acknowledges on return, refuses for good
+  on `RejectAndDontRequeueError` or an unreadable body, and tries another failure three times before refusing it. The
+  template sends persistent JSON with publisher confirms and tries a fresh connection once.
+- `snakeboot.component_scan`: `classes_marked` and `methods_marked` find what decorators marked, like Spring's
+  `MethodIntrospector`; `ControllerScan` uses them, and so do the scheduler and the listeners.
+- pika's own log messages start at WARNING, so a listener's connection does not fill the log.
 
 ## 0.5.2
 
