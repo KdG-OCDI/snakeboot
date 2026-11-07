@@ -12,7 +12,7 @@ application, `snakeboot.django_application` reads every section, Django's own in
 `load_configuration(ChatbotProperties, package="myservice")` reads the sections it is given.
 `DjangoProperties`, `DatabaseProperties` and `CacheProperties` are the sections Django itself needs;
 `OAuth2Properties` names the authorization server whose tokens `snakeboot.oauth2` accepts; `SchedulingProperties`
-turns `@scheduled` methods off in a process.
+turns `@scheduled` methods off in a process; `RabbitProperties` names the broker of `snakeboot.rabbitmq`.
 """
 
 from snakeboot.configuration.cache_properties import CacheProperties
@@ -27,6 +27,7 @@ from snakeboot.configuration.database_properties import DatabaseProperties
 from snakeboot.configuration.django_properties import DjangoProperties
 from snakeboot.configuration.load_configuration import begin_configuration, load_configuration
 from snakeboot.configuration.oauth2_properties import OAuth2Properties
+from snakeboot.configuration.rabbitmq_properties import RabbitListenerProperties, RabbitProperties
 from snakeboot.configuration.scheduling_properties import SchedulingProperties
 from snakeboot.configuration.section import Section
 from snakeboot.configuration.section_prefix import sections_declared_in
@@ -42,6 +43,8 @@ __all__ = [
     "DjangoProperties",
     "InvalidConfigurationPropertiesError",
     "OAuth2Properties",
+    "RabbitListenerProperties",
+    "RabbitProperties",
     "SchedulingProperties",
     "Section",
     "begin_configuration",

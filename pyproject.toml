@@ -42,6 +42,8 @@ ninja = ["django>=6.1.1", "django-ninja>=1.7.1"]
 configuration = ["pydantic-settings>=2.16.0,<3"]
 # Accept the JWT access tokens of an OAuth2 authorization server, such as Keycloak (snakeboot.oauth2).
 oauth2 = ["django>=6.1.1", "django-ninja>=1.7.1", "pydantic-settings>=2.16.0,<3", "pyjwt[crypto]>=2.10.1"]
+# @rabbit_listener methods and a RabbitTemplate on RabbitMQ, through pika (snakeboot.rabbitmq).
+rabbitmq = ["pydantic-settings>=2.16.0,<3", "pika>=1.3.2"]
 
 [build-system]
 requires = ["uv_build>=0.12.19,<0.13.0"]
@@ -54,6 +56,7 @@ dev = [
     "django-stubs>=6.1.2",
     "import-linter>=2.15",
     "mypy>=2.4.0",
+    "pika>=1.3.2",
     "pre-commit>=4.7.0",
     "pydantic-settings>=2.16.0,<3",
     "pyjwt[crypto]>=2.10.1",
@@ -83,6 +86,8 @@ name = "transaction knows no framework and no other part of snakeboot"
 type = "forbidden"
 source_modules = ["snakeboot.transaction"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
@@ -106,6 +111,8 @@ name = "component_scan is standard library only, so settings can use it before D
 type = "forbidden"
 source_modules = ["snakeboot.component_scan"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
@@ -129,6 +136,8 @@ name = "events knows wireup and transaction, but no web or ORM framework"
 type = "forbidden"
 source_modules = ["snakeboot.events"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
@@ -149,6 +158,8 @@ name = "rest knows Ninja, wireup and the component scan, but not the transaction
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "snakeboot.configuration",
@@ -166,6 +177,8 @@ name = "django adapts transaction to Django, nothing else"
 type = "forbidden"
 source_modules = ["snakeboot.django"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "ninja",
@@ -185,6 +198,8 @@ name = "testing helpers run without a framework"
 type = "forbidden"
 source_modules = ["snakeboot.testing"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
@@ -206,6 +221,8 @@ name = "configuration knows Pydantic Settings and wireup, but no web or ORM fram
 type = "forbidden"
 source_modules = ["snakeboot.configuration"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
@@ -226,6 +243,8 @@ name = "django_application starts the container, the configuration, the transact
 type = "forbidden"
 source_modules = ["snakeboot.django_application"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "ninja",
     "snakeboot.events",
@@ -240,6 +259,8 @@ name = "openapi is standard library only, so an application class can use it bef
 type = "forbidden"
 source_modules = ["snakeboot.openapi"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "django",
@@ -264,6 +285,8 @@ name = "oauth2 knows the REST library, the configuration and PyJWT, but no ORM, 
 type = "forbidden"
 source_modules = ["snakeboot.oauth2"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "snakeboot.lifecycle",
     "snakeboot.transaction",
@@ -278,6 +301,8 @@ name = "lifecycle knows wireup, the event library and the component scan, but no
 type = "forbidden"
 source_modules = ["snakeboot.lifecycle"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "snakeboot.scheduling",
     "django",
     "ninja",
@@ -297,11 +322,29 @@ name = "scheduling knows wireup, the lifecycle and the configuration, but no web
 type = "forbidden"
 source_modules = ["snakeboot.scheduling"]
 forbidden_modules = [
+    "snakeboot.rabbitmq",
+    "pika",
     "django",
     "ninja",
     "snakeboot.rest",
     "snakeboot.django",
     "snakeboot.django_application",
+    "snakeboot.testing",
+    "snakeboot.oauth2",
+    "jwt",
+]
+
+[[tool.importlinter.contracts]]
+name = "rabbitmq knows pika, Pydantic, wireup, the lifecycle and the configuration, but no web or ORM framework"
+type = "forbidden"
+source_modules = ["snakeboot.rabbitmq"]
+forbidden_modules = [
+    "django",
+    "ninja",
+    "snakeboot.rest",
+    "snakeboot.django",
+    "snakeboot.django_application",
+    "snakeboot.scheduling",
     "snakeboot.testing",
     "snakeboot.oauth2",
     "jwt",
@@ -349,6 +392,11 @@ mypy_path = "src"
 explicit_package_bases = true
 enable_error_code = ["explicit-override", "ignore-without-code", "redundant-expr", "truthy-bool", "possibly-undefined"]
 plugins = ["mypy_django_plugin.main"]
+
+[[tool.mypy.overrides]]
+# pika has annotations, but no py.typed marker.
+module = ["pika", "pika.*"]
+ignore_missing_imports = true
 
 [[tool.mypy.overrides]]
 # asgiref.testing.ApplicationCommunicator, which drives an ASGI application in the lifespan tests, has no annotations.

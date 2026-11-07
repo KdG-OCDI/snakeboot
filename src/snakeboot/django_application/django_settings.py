@@ -10,6 +10,7 @@ from snakeboot.configuration import (
     DatabaseProperties,
     DjangoProperties,
     OAuth2Properties,
+    RabbitProperties,
     SchedulingProperties,
     begin_configuration,
 )
@@ -20,6 +21,10 @@ APPLICATION_SETTING: Final = "APPLICATION"
 """The setting that holds the class marked with `@application_root`, for the URLs and the tests."""
 
 URL_CONFIGURATION: Final = "snakeboot.rest.urls"
+
+RABBITMQ_AUTO_CONFIGURATION: Final = "snakeboot.rabbitmq.rabbitmq_injectable"
+"""The module that brings RabbitMQ into the container, only when the application has `[rabbitmq]`: by name, so an
+application without the section imports no pika."""
 
 
 def django_settings(application: type) -> dict[str, Any]:
@@ -32,7 +37,8 @@ def django_settings(application: type) -> dict[str, Any]:
         CACHES                                       from [cache], when the application has that table
         CONFIGURATION                                the sections read, completed when Django starts; [oauth2],
                                                      when there, for a JwtBearerAuthentication
-        WIREUP                                       the container: the modules of the component scan
+        WIREUP                                       the container: the modules of the component scan, and
+                                                     RabbitMQ's listeners and template when [rabbitmq] is there
         INSTALLED_APPS                               snakeboot, wireup, every AppConfig, and what DjangoConfigurers add
         MIDDLEWARE                                   wireup's, what DjangoConfigurers add, then CommonMiddleware
         TEMPLATES, ROOT_URLCONF                      Swagger UI's templates and snakeboot's URLs
@@ -48,7 +54,7 @@ def django_settings(application: type) -> dict[str, Any]:
     configurers = configurers_in(scans)
     configuration = begin_configuration(
         DjangoProperties,
-        optional=(DatabaseProperties, CacheProperties, OAuth2Properties, SchedulingProperties),
+        optional=(DatabaseProperties, CacheProperties, OAuth2Properties, RabbitProperties, SchedulingProperties),
         package=application_package(application),
     )
     return {
@@ -93,4 +99,6 @@ def _infrastructure(configuration: Configuration) -> dict[str, Any]:
 def _container_of(configuration: Configuration, component_scan: ComponentScan) -> WireupSettings:
     # Django's own sections are declared in snakeboot, outside the scan: their modules join the container too.
     modules = [*component_scan.module_names(), *(section.__module__ for section in configuration.sections)]
+    if RabbitProperties in configuration.sections:
+        modules.append(RABBITMQ_AUTO_CONFIGURATION)
     return WireupSettings(injectables=list(dict.fromkeys(modules)), auto_inject_views=False)
