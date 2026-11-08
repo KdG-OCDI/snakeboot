@@ -16,11 +16,22 @@ nothing of Django or Django Ninja any more, so snakeboot can bind another framew
   `@ResponseStatus`; `public=True` opens an endpoint, like `permitAll()`. A route takes no other option. A method that
   takes `request`, a public endpoint that asks for a `Principal` and a `Principal` without a `BearerAuthentication`
   stop the start.
+- `snakeboot.rest`: `ServerSentEvents`, like Spring's `SseEmitter`. An endpoint that returns it streams
+  `text/event-stream`, uncached and unbuffered, with a heartbeat comment after 15 silent seconds and an end after 30
+  minutes. `ServerSentEvents.watching(read, every=..., until=..., as_event=...)` reads a value in the call, then
+  sends it whenever it changed; its reads run between fresh database connections. `ServerSentEvent` data that is no
+  text is the JSON a REST answer would hold.
+- `snakeboot.rest`: `InvalidRequestError`, like Spring's `MethodArgumentNotValidException`: a call that does not fit its
+  endpoint (a missing field, a wrong type), with one `RequestProblem` per error. An advice answers it like any error,
+  and `error_answer` makes it `{"code": "invalid_request", ...}`; without such an advice the framework answers 422 its
+  own way.
 - `snakeboot.django_ninja`: the REST API on Django Ninja (`rest_api`, `url_patterns`, `NinjaEndpointFactory`), which
   was part of `snakeboot.rest`. `ControllerScan(...).find()` returns the checked API without building anything.
 - `snakeboot.command_line`: `CommandLineRunner`, like Spring Boot's, with constructor injection and argparse.
+  `add_arguments` is a classmethod and `run_command(SelfPlayCommand, arguments, program=..., build=...)` parses before
+  it builds, so `--help` and a wrong argument answer at once, whatever the command depends on.
   `python -m myapp self_play --games 20` runs the one its first argument names; `help` lists them next to Django's
-  commands. `CommandLineError` stops a command with a message and status 1.
+  commands, those of its apps (`run_lifecycle`) included, and names the program `python -m myapp`. `CommandLineError` stops a command with a message and status 1.
 - `snakeboot.configuration`: the table `[django]` is `[server]` (`ServerProperties`, environment `SERVER__*`), with
   the same keys. `DatabaseProperties` and `CacheProperties` lost `as_django_database` and `as_django_cache`;
   `snakeboot.django_application.django_settings` converts them.
@@ -38,6 +49,8 @@ Moving an application from 0.6:
 | `@route.post("/x", response={201: MoveDTO})`, `return Status(201, move)` | `@route.post("/x", status=201)`, `return move` |
 | `@route.get("/x", auth=None)` | `@route.get("/x", public=True)` |
 | `class BodyDTO(ninja.Schema)` | `class BodyDTO(pydantic.BaseModel)` |
+| `StreamingHttpResponse(events, content_type="text/event-stream")` with `sync_to_async` reads | `-> ServerSentEvents`, `ServerSentEvents.watching(...)` |
+| `@exception_handler(ninja.errors.ValidationError, status=422)` | `@exception_handler(InvalidRequestError, status=422)` |
 | `class Command(BaseCommand)` with `@inject_app` and an `apps.py` for the commands | `class X(CommandLineRunner, command="...")`, no `apps.py` |
 | `[django]`, `DJANGO__SECRET_KEY`, `DjangoProperties` | `[server]`, `SERVER__SECRET_KEY`, `ServerProperties` |
 

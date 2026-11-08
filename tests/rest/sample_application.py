@@ -23,3 +23,13 @@ class SecuredApplication:
 @application_root(base_packages=("tests.rest.sample_controllers", "tests.rest.doubly_secured"))
 class DoublySecuredApplication:
     pass
+
+
+@application_root(base_packages=("tests.rest.streaming",))
+class StreamingApplication:
+    pass
+
+
+@application_root(base_packages=("tests.rest.unadvised",))
+class UnadvisedApplication:
+    pass

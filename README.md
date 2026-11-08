@@ -18,6 +18,8 @@ see Django.
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
 | `@rest_controller`, `@route.get(status=...)`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@ResponseStatus`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
 | `Principal` | `@AuthenticationPrincipal` | `snakeboot[ninja]` |
+| `InvalidRequestError`, `RequestProblem` | `MethodArgumentNotValidException` | `snakeboot[ninja]` |
+| `ServerSentEvents`, `ServerSentEvent` | `SseEmitter`, `ServerSentEvent` | `snakeboot[ninja]` |
 | `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
 | `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@ConfigurationPropertiesScan`, profiles | `snakeboot[configuration]` |
 | `ServerProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
@@ -160,8 +162,9 @@ class ParticipantNotificationListener:
 the component scan, the same modules that fill the container, and `snakeboot.django_ninja` publishes their routes.
 A controller sees no request: an endpoint takes what the call carries (path and query parameters, a body as a
 Pydantic model) and returns the body, whose type is its return annotation; `status=` sets the status of the answer,
-like `@ResponseStatus`. Two endpoints for the same URL, two answers for one error, or a method that takes `request`
-stop the start-up.
+like `@ResponseStatus`. A call that does not fit (a missing field, a wrong type) is an `InvalidRequestError`, which
+an advice answers like any error, as with Spring's `MethodArgumentNotValidException`. Two endpoints for the same URL,
+two answers for one error, or a method that takes `request` stop the start-up.
 
 ```python
 @rest_controller("/workshops", tags=["workshops"])
@@ -182,6 +185,28 @@ class EnrollmentRestErrorAdvice:
     def answer_not_found(self, error: Exception) -> dict[str, str]:
         return error_answer(error)  # {"code": "workshop_not_found", "detail": "..."}
 
+    @exception_handler(InvalidRequestError, status=422)
+    def answer_invalid_request(self, error: Exception) -> dict[str, str]:
+        return error_answer(error)  # {"code": "invalid_request", "detail": "body.body.title: Field required"}
+```
+
+**Server-sent events.** An endpoint that returns `ServerSentEvents` streams, like one that returns Spring's
+`SseEmitter`: the web framework serves it as `text/event-stream`, uncached and unbuffered, and under ASGI a watching
+client holds no thread. `ServerSentEvents.watching` covers what most streams do: it reads a value once in the call
+(so an unknown id answers 404 as usual), then every `every`, and sends it whenever it changed, until `until` holds.
+A silence of 15 seconds gets a comment that keeps proxies open, and a stream ends after 30 minutes, when the
+browser's `EventSource` reconnects. The reads run as the framework runs synchronous code, between fresh database
+connections; `ServerSentEvents(source)` takes an async iterable of `ServerSentEvent`s for any other stream.
+
+```python
+@route.get("/games/{game_id}/events")
+def watch_game(self, game_id: str) -> ServerSentEvents:
+    return ServerSentEvents.watching(
+        lambda: self._get_game.execute(GetGameRequestDTO(game_id=game_id)),
+        every=timedelta(milliseconds=500),
+        until=lambda game: game.status in FINAL_STATUSES,
+        as_event=lambda game: ServerSentEvent(game, event="game", id=str(game.version)),  # data as JSON
+    )
 ```
 
 **Authentication.** An adapter that extends `BearerAuthentication` is a component of the container, like a
@@ -238,9 +263,11 @@ class RegisterOnStartup:
 
 **Commands.** A subclass of `CommandLineRunner` that names its command is a command of the application, like a
 `CommandLineRunner` bean: a component whose constructor receives use cases and ports, with arguments declared as with
-argparse. `python -m myapp self_play --games 20` starts the application and runs it; `python -m myapp help` lists the
-commands next to the framework's own (`migrate`), and `help self_play` prints its help, which is its docstring. Unlike
-Spring Boot, which runs every runner at each start, the first argument chooses one, as with Spring Shell's `@Command`.
+argparse in a classmethod, because they are parsed before the command is built: `--help` answers at once, even when
+the command depends on a server that is down. `python -m myapp self_play --games 20` starts the application and runs
+it; `python -m myapp help` lists the commands next to the framework's own (`migrate`, `run_lifecycle`), and
+`help self_play` prints its help, which is its docstring. Unlike Spring Boot, which runs every runner at each start,
+the first argument chooses one, as with Spring Shell's `@Command`.
 A `CommandLineError` stops the command with its message and exit status 1; two commands of one name stop the start.
 
 ```python
@@ -250,8 +277,9 @@ class SelfPlayCommand(CommandLineRunner, command="self_play"):
     def __init__(self, self_play: SelfPlayUseCase) -> None:
         self._self_play = self_play
 
+    @classmethod
     @override
-    def add_arguments(self, parser: ArgumentParser) -> None:
+    def add_arguments(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--games", type=int, default=20, help="Games per pairing.")
 
     @override

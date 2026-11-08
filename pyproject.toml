@@ -163,7 +163,7 @@ forbidden_modules = [
 ]
 
 [[tool.importlinter.contracts]]
-name = "rest knows wireup and the component scan, but no web framework and no other library"
+name = "rest knows wireup, the component scan and Pydantic's JSON, but no web framework and no other library"
 type = "forbidden"
 source_modules = ["snakeboot.rest"]
 forbidden_modules = [

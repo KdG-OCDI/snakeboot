@@ -20,8 +20,9 @@ class GreetCommand(CommandLineRunner, command="greet"):
     def __init__(self, journal: Journal) -> None:
         self._journal = journal
 
+    @classmethod
     @override
-    def add_arguments(self, parser: ArgumentParser) -> None:
+    def add_arguments(cls, parser: ArgumentParser) -> None:
         parser.add_argument("--name", required=True)
         parser.add_argument("--times", type=int, default=1)
 

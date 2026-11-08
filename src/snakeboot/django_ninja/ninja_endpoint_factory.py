@@ -8,7 +8,14 @@ from ninja import NinjaAPI
 from wireup import ScopedSyncContainer
 from wireup.integration.django import get_request_container
 
-from snakeboot.rest import DeclaredEndpoint, DeclaredErrorHandler, NoAuthenticatedPrincipalError, Principal
+from snakeboot.django_ninja.event_stream import event_stream_response
+from snakeboot.rest import (
+    DeclaredEndpoint,
+    DeclaredErrorHandler,
+    NoAuthenticatedPrincipalError,
+    Principal,
+    ServerSentEvents,
+)
 
 ComponentResolver = Callable[[type], object]
 ErrorAnswer = Callable[[HttpRequest, Exception], HttpResponse]
@@ -43,7 +50,8 @@ class NinjaEndpointFactory:
     Ninja reads a view's signature to find path, query and body parameters, and passes the request first. A view
     built here shows Ninja `request` followed by the parameters the call carries, and hides `self` and every
     `Principal` parameter. When called, it asks the resolver for the controller, fills the principals from the
-    request, and calls the method; the request itself never reaches the controller.
+    request, and calls the method; the request itself never reaches the controller. `ServerSentEvents` become a
+    streaming response; any other answer is Ninja's to render.
 
     Resolving per call (not once at start-up) keeps two things working: wireup's request scope under both WSGI and
     ASGI, and wireup overrides in tests.
@@ -55,13 +63,14 @@ class NinjaEndpointFactory:
     def create(self, endpoint: DeclaredEndpoint) -> Callable[..., Any]:
         """Returns the Ninja view of `endpoint`."""
         method, owner = endpoint.method, endpoint.controller_class
-        principal_parameters = endpoint.signature.principal_parameters
+        principal_parameters, status = endpoint.signature.principal_parameters, endpoint.route_mapping.status
         resolve = self._resolve
 
         @functools.wraps(method)
         def view(request: HttpRequest, **values: Any) -> Any:
             principals = {name: principal_of(request) for name in principal_parameters}
-            return method(resolve(owner), **values, **principals)
+            answer = method(resolve(owner), **values, **principals)
+            return event_stream_response(answer, status) if isinstance(answer, ServerSentEvents) else answer
 
         view.__signature__ = inspect.Signature([_REQUEST, *endpoint.signature.parameters])  # type: ignore[attr-defined]
         return view

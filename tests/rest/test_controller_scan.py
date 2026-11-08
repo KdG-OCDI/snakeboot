@@ -52,10 +52,12 @@ def test_tags_default_to_the_class_name() -> None:
 
 
 def test_finds_the_error_answers_of_the_advices() -> None:
-    [handler] = scan_of("sample_controllers").find().error_handlers
+    handlers = scan_of("sample_controllers").find().error_handlers
 
-    assert handler.name == "GreetingRestErrorAdvice.answer_unknown_name"
-    assert handler.mapping.status == 404
+    assert [(handler.name, handler.mapping.status) for handler in handlers] == [
+        ("GreetingRestErrorAdvice.answer_invalid_request", 422),
+        ("GreetingRestErrorAdvice.answer_unknown_name", 404),
+    ]
 
 
 def test_finds_the_authentication_of_the_api() -> None:

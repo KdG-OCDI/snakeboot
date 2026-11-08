@@ -5,8 +5,9 @@
 
         def __init__(self, train: TrainUseCase) -> None: ...   # constructor injection
 
+        @classmethod
         @override
-        def add_arguments(self, parser: ArgumentParser) -> None: ...   # argparse
+        def add_arguments(cls, parser: ArgumentParser) -> None: ...   # argparse, before anything is built
 
         @override
         def run(self, arguments: Namespace) -> None: ...

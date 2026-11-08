@@ -1,6 +1,13 @@
 from pydantic import BaseModel
 
-from snakeboot.rest import error_answer, exception_handler, rest_controller, rest_controller_advice, route
+from snakeboot.rest import (
+    InvalidRequestError,
+    error_answer,
+    exception_handler,
+    rest_controller,
+    rest_controller_advice,
+    route,
+)
 
 
 class GreetingRequestBodyDTO(BaseModel):
@@ -49,4 +56,8 @@ class GreetingRestErrorAdvice:
 
     @exception_handler(UnknownNameError, status=404)
     def answer_unknown_name(self, error: Exception) -> dict[str, str]:
+        return error_answer(error)
+
+    @exception_handler(InvalidRequestError, status=422)
+    def answer_invalid_request(self, error: Exception) -> dict[str, str]:
         return error_answer(error)

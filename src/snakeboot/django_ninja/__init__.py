@@ -7,19 +7,23 @@ names, serves it under /api/ with /health beside it. Controllers never see Ninja
 binding like this one, and no controller would change.
 """
 
+from snakeboot.django_ninja.event_stream import django_blocking, event_stream_response
 from snakeboot.django_ninja.ninja_endpoint_factory import (
     ComponentResolver,
     NinjaEndpointFactory,
     principal_of,
     resolve_from_wireup_request_scope,
 )
-from snakeboot.django_ninja.rest_api import BearerToken, add_routes, rest_api, url_patterns
+from snakeboot.django_ninja.rest_api import BearerToken, add_routes, invalid_request_of, rest_api, url_patterns
 
 __all__ = [
     "BearerToken",
     "ComponentResolver",
     "NinjaEndpointFactory",
     "add_routes",
+    "django_blocking",
+    "event_stream_response",
+    "invalid_request_of",
     "principal_of",
     "resolve_from_wireup_request_scope",
     "rest_api",

@@ -18,7 +18,8 @@ class CommandLineRunner(ABC):
 
     Extend it with the name of the command, and the subclass is a component of the container: its constructor
     receives use cases, ports and sections by type, like any adapter. `python -m myapp <command> [arguments]` starts
-    the application, parses the arguments with `add_arguments` and calls `run`. Unlike Spring Boot, which runs every
+    the application, parses the arguments with `add_arguments`, and only then builds the command and calls `run`:
+    `--help` answers at once, whatever the command depends on. Unlike Spring Boot, which runs every
     CommandLineRunner at each start, an application has as many commands as it likes and the first argument chooses
     one, as with Spring Shell's `@Command`.
 
@@ -28,8 +29,9 @@ class CommandLineRunner(ABC):
             def __init__(self, self_play: SelfPlayUseCase) -> None:
                 self._self_play = self_play
 
+            @classmethod
             @override
-            def add_arguments(self, parser: ArgumentParser) -> None:
+            def add_arguments(cls, parser: ArgumentParser) -> None:
                 parser.add_argument("--games", type=int, default=20, help="Games per pairing.")
 
             @override
@@ -47,6 +49,7 @@ class CommandLineRunner(ABC):
     def __init_subclass__(cls, *, command: str = "", **kwargs: Any) -> None:
         """Registers a subclass that names its command as a component; an abstract one without a name is a base."""
         super().__init_subclass__(**kwargs)
+        _refuse_arguments_of_an_instance(cls)
         still_abstract = getattr(cls.run, "__isabstractmethod__", False)
         if still_abstract and not command:
             return
@@ -55,12 +58,26 @@ class CommandLineRunner(ABC):
         setattr(cls, COMMAND_ATTRIBUTE, command)
         injectable(cls)
 
-    def add_arguments(self, parser: ArgumentParser) -> None:  # noqa: B027  # reason: a hook a command may leave out
-        """Declares the arguments of the command on `parser`, as with argparse; by default it takes none."""
+    @classmethod  # noqa: B027  # reason: a hook a command may leave out
+    def add_arguments(cls, parser: ArgumentParser) -> None:
+        """Declares the arguments of the command on `parser`, as with argparse; by default it takes none.
+
+        A classmethod: the arguments are parsed before the command is built, so `--help` and a wrong argument need
+        nothing the command depends on (a client that connects to a server, say).
+        """
 
     @abstractmethod
     def run(self, arguments: Namespace) -> None:
         """Does the work of the command with the parsed `arguments`."""
+
+
+def _refuse_arguments_of_an_instance(cls: type) -> None:
+    declared = vars(cls).get("add_arguments")
+    if declared is not None and not isinstance(declared, classmethod):
+        raise InvalidCommandLineRunnerError(
+            f"{cls.__qualname__}.add_arguments must be a @classmethod: the arguments are parsed before the command "
+            "is built, so --help needs nothing the command depends on."
+        )
 
 
 def _refuse_invalid_command(cls: type, command: str, *, still_abstract: bool) -> None:

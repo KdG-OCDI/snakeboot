@@ -1,6 +1,7 @@
 import os
 import sys
 from collections.abc import Sequence
+from functools import partial
 from importlib import import_module
 from typing import Final
 
@@ -9,7 +10,7 @@ from django.core.asgi import get_asgi_application
 from django.core.exceptions import ImproperlyConfigured
 from django.core.handlers.asgi import ASGIHandler
 from django.core.handlers.wsgi import WSGIHandler
-from django.core.management import execute_from_command_line, get_commands
+from django.core.management import ManagementUtility, get_commands
 from django.core.wsgi import get_wsgi_application
 from wireup.integration.django import get_app_container
 
@@ -37,23 +38,24 @@ def run(application: type, argv: Sequence[str] | None = None) -> None:
     `CommandLineRunner` of the component scan runs when the first argument names it (`python -m myapp self_play
     --games 20`, or `help self_play` for its help); every other command is Django's, so `python -m myapp migrate`
     migrates and `python manage.py runserver` serves. A command exits with status 1 on a `CommandLineError`.
+
+    Django starts first: only then does it know every command, those of its apps (`run_lifecycle`) included, and
+    a runner with the name of one of them stops the start.
     """
     arguments = list(argv) if argv is not None else list(sys.argv)
     _start(application)
-    command, command_arguments = _requested_command(arguments)
-    if command in get_commands():
-        execute_from_command_line(arguments)  # as Django starts its own commands, runserver's autoreload included
-        return
     setup()
+    command, command_arguments = _requested_command(arguments)
     runners = _command_line_runners_of(application)
+    program = _program_of(application, arguments[0])
     runner = runners.get(command)
     if runner is None:
-        execute_from_command_line(arguments)  # help, version, or a command nobody knows: Django answers
+        _run_django_command(arguments, program)  # Django's commands, help and version, or a command nobody knows
         if command in HELP:
             sys.stdout.write(commands_help(runners))
         return
-    program = _program_of(application, arguments[0])
-    if exit_status := run_command(DjangoApplicationComponents().get(runner), command_arguments, program=program):
+    build = partial(DjangoApplicationComponents().get, runner)  # only once the arguments are parsed
+    if exit_status := run_command(runner, command_arguments, program=program, build=build):
         sys.exit(exit_status)
 
 
@@ -113,6 +115,14 @@ def _command_line_runners_of(application: type) -> dict[str, type[CommandLineRun
             f"{', '.join(clashing)}: Django has a command of that name already; name the CommandLineRunner otherwise."
         )
     return runners
+
+
+def _run_django_command(arguments: list[str], program: str) -> None:
+    # What execute_from_command_line does, with the program the help should name: Django would say
+    # `python -m django` for `python -m myapp`.
+    utility = ManagementUtility(arguments)
+    utility.prog_name = program
+    utility.execute()
 
 
 def _program_of(application: type, script: str) -> str:

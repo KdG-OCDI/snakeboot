@@ -1,7 +1,7 @@
 import inspect
 import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 
 from snakeboot.command_line.command_line_errors import CommandLineError, InvalidCommandLineRunnerError
 from snakeboot.command_line.command_line_runner import COMMAND_ATTRIBUTE, CommandLineRunner
@@ -22,21 +22,25 @@ def command_line_runners(component_scan: ComponentScan) -> dict[str, type[Comman
     return runners
 
 
-def run_command(runner: CommandLineRunner, arguments: Sequence[str], *, program: str) -> int:
-    """Parses `arguments` for `runner`, runs it and returns the exit status.
+def run_command[R: CommandLineRunner](
+    runner_class: type[R], arguments: Sequence[str], *, program: str, build: Callable[[], R]
+) -> int:
+    """Parses `arguments` for `runner_class`, then builds the command with `build`, runs it and returns the status.
 
-    As with argparse, `--help` prints the help of the command and an argument it does not know stops with status 2.
-    A `CommandLineError` prints its message to standard error and returns 1.
+    The arguments come first, as Spring Shell reads its options before it calls the command: `--help` prints the
+    help and an argument the command does not know stops with status 2, before anything the command depends on is
+    built. A `CommandLineError` prints its message to standard error and returns 1. The application builds the
+    command from its container; a test builds it with doubles: `build=lambda: SelfPlayCommand(fake_use_case)`.
     """
     parser = ArgumentParser(
-        prog=f"{program} {runner.command}",
-        description=_help_of(type(runner)),
+        prog=f"{program} {runner_class.command}",
+        description=_help_of(runner_class),
         formatter_class=RawDescriptionHelpFormatter,  # the docstring keeps its paragraphs
     )
-    runner.add_arguments(parser)
+    runner_class.add_arguments(parser)
     parsed = parser.parse_args(list(arguments))
     try:
-        runner.run(parsed)
+        build().run(parsed)
     except CommandLineError as error:
         sys.stderr.write(f"{parser.prog}: {error}\n")
         return 1

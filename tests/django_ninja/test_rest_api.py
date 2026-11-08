@@ -8,15 +8,17 @@ import wireup
 from django.test import RequestFactory
 from django.urls import URLPattern
 from ninja import NinjaAPI
+from ninja.errors import ValidationError
 from ninja.testing import TestClient
 from wireup import injectable
 
-from snakeboot.django_ninja import rest_api, url_patterns
-from snakeboot.rest import InvalidRestControllerError
+from snakeboot.django_ninja import invalid_request_of, rest_api, url_patterns
+from snakeboot.rest import InvalidRestControllerError, RequestProblem
 from tests.rest.sample_application import (
     DoublySecuredApplication,
     GreetingApplication,
     SecuredApplication,
+    UnadvisedApplication,
     UndescribedApplication,
 )
 from tests.rest.sample_controllers.greeting_rest_controller import (
@@ -27,6 +29,7 @@ from tests.rest.sample_controllers.greeting_rest_controller import (
 from tests.rest.sample_controllers.nested.farewell_rest_controller import FarewellRestController
 from tests.rest.secured import token_checker
 from tests.rest.secured.who_am_i_rest_controller import WhoAmIRestController
+from tests.rest.unadvised.echo_rest_controller import EchoRestController
 
 _namespaces = count()
 
@@ -112,8 +115,30 @@ def test_a_method_that_returns_none_answers_without_a_body(client: TestClient) -
     assert (deleted.status_code, deleted.content) == (204, b"")
 
 
-def test_ninja_still_validates_the_input(client: TestClient) -> None:
-    assert client.post("/greetings", json={"nam": "x"}).status_code == 422
+def test_a_call_that_does_not_fit_is_an_invalid_request_the_advice_answers(client: TestClient) -> None:
+    response = client.post("/greetings", json={"nam": "x"})
+
+    assert response.status_code == 422
+    assert response.json() == {"code": "invalid_request", "detail": "body.body.name: Field required"}
+
+
+def test_without_an_advice_for_it_an_invalid_request_is_ninja_s_422() -> None:
+    api = rest_api(UnadvisedApplication, resolve=lambda _: EchoRestController())
+    api.urls_namespace = f"rest-api-test-{next(_namespaces)}"
+
+    response = TestClient(api).post("/echo", json={})
+
+    assert response.status_code == 422
+    assert response.json()["detail"][0]["loc"] == ["body", "body", "text"]
+
+
+def test_ninja_s_validation_error_becomes_one_request_problem_per_error() -> None:
+    error = invalid_request_of(
+        ValidationError([{"loc": ("query", "cells", 2), "msg": "too big"}, {"loc": ("body",), "msg": "missing"}])
+    )
+
+    assert error.problems == (RequestProblem(("query", "cells", "2"), "too big"), RequestProblem(("body",), "missing"))
+    assert str(error) == "query.cells.2: too big; body: missing"
 
 
 def test_an_advice_answers_the_errors_of_every_controller(client: TestClient) -> None:
