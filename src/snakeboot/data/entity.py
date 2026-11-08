@@ -120,9 +120,9 @@ def entity[C: type](table: str, *, indexes: tuple[Index, ...] = ()) -> Callable[
             updated_at: Annotated[datetime | None, LastModifiedDate()] = None
 
     A field's type is its column's: `str`, `int`, `float`, `bool`, `Decimal`, `UUID`, `datetime` (with its time zone),
-    `date`, and `list`, `dict` or `Any` as JSON (`Json()` makes any field JSON); `X | None` may be empty. The class knows no persistence framework, so a
-    domain or an adapter keeps it free of one. It is a plain, mutable dataclass: the persistence framework sets its
-    fields. Everything is checked here, when the module is imported.
+    `date`, and `list`, `dict` or `Any` as JSON (`Json()` makes any field JSON); `X | None` may be empty. The class
+    knows no persistence framework, so a domain or an adapter keeps it free of one. It is a plain, mutable dataclass:
+    the persistence framework sets its fields. Everything is checked here, when the module is imported.
     """
 
     def declare(entity_type: C) -> C:
