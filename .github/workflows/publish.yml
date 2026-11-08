@@ -111,6 +111,7 @@ jobs:
           import snakeboot.component_scan, snakeboot.django, snakeboot.events
           import snakeboot.configuration, snakeboot.rest, snakeboot.testing, snakeboot.transaction, snakeboot.oauth2
           import snakeboot.lifecycle, snakeboot.scheduling, snakeboot.rabbitmq
+          import snakeboot.boot, snakeboot.command_line, snakeboot.django_ninja
           from snakeboot.component_scan import SNAKEBOOT_AUTO_CONFIGURATION
           import importlib
           for module in SNAKEBOOT_AUTO_CONFIGURATION:

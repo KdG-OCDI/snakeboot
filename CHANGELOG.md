@@ -1,9 +1,9 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.6,<0.7`.
+a minor release may break the API: pin `snakeboot>=0.7,<0.8`.
 
-## Unreleased
+## 0.7.0
 
 An application speaks snakeboot, not Django: its entry points, controllers, commands and configuration import
 nothing of Django or Django Ninja any more, so snakeboot can bind another framework without changing them.
@@ -31,7 +31,8 @@ nothing of Django or Django Ninja any more, so snakeboot can bind another framew
   `add_arguments` is a classmethod and `run_command(SelfPlayCommand, arguments, program=..., build=...)` parses before
   it builds, so `--help` and a wrong argument answer at once, whatever the command depends on.
   `python -m myapp self_play --games 20` runs the one its first argument names; `help` lists them next to Django's
-  commands, those of its apps (`run_lifecycle`) included, and names the program `python -m myapp`. `CommandLineError` stops a command with a message and status 1.
+  commands, those of its apps (`run_lifecycle`) included, and names the program `python -m myapp`.
+  `CommandLineError` stops a command with a message and status 1.
 - `snakeboot.configuration`: the table `[django]` is `[server]` (`ServerProperties`, environment `SERVER__*`), with
   the same keys. `DatabaseProperties` and `CacheProperties` lost `as_django_database` and `as_django_cache`;
   `snakeboot.django_application.django_settings` converts them.
@@ -40,7 +41,7 @@ nothing of Django or Django Ninja any more, so snakeboot can bind another framew
 
 Moving an application from 0.6:
 
-| 0.6 | now |
+| 0.6 | 0.7 |
 |---|---|
 | `from snakeboot.django_application import run` (and `asgi_application`, `wsgi_application`) | `from snakeboot.boot import run` |
 | `def get_game(self, request: HttpRequest, game_id: str)` | `def get_game(self, game_id: str)` |
