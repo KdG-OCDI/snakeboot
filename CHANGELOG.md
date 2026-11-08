@@ -3,7 +3,7 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.9,<0.10`.
 
-## Unreleased
+## 0.9.0
 
 - `python -m myapp serve` starts the web server, like the server Spring Boot embeds: uvicorn, where `[server] host`
   and `port` say, with `[server] workers` processes, each building the application and its lifecycle; `--reload`
