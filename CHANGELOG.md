@@ -3,7 +3,7 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.8,<0.9`.
 
-## Unreleased
+## 0.8.0
 
 snakeboot runs on FastAPI, SQLAlchemy and Alembic instead of Django, and an application sees none of them: its
 entities, repositories, migrations and tests are in snakeboot's terms now too. 0.7 stays on the branch `release-0.7`.
