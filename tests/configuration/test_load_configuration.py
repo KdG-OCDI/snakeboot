@@ -7,8 +7,10 @@ from pydantic import ValidationError
 
 from snakeboot.configuration import (
     PROFILE_VARIABLE,
+    CacheProperties,
     Configuration,
     ConfigurationFileNotFoundError,
+    DatabaseProperties,
     ServerProperties,
     load_configuration,
 )
@@ -154,11 +156,14 @@ def test_no_sections_is_a_valid_configuration() -> None:
     assert dict(configuration.sections) == {}
 
 
-def test_the_secret_key_never_shows() -> None:
-    server = load_sample().get(ServerProperties)
+def test_a_password_never_shows() -> None:
+    sections = (ServerProperties, DatabaseProperties, CacheProperties)
+    database = load_configuration(*sections, package="tests.configuration.infrastructure_service").get(
+        DatabaseProperties
+    )
 
-    assert "test-only-secret" not in repr(server)
-    assert server.secret_key.get_secret_value() == "test-only-secret"
+    assert "test-only-password" not in repr(database)
+    assert database.password.get_secret_value() == "test-only-password"
 
 
 def test_a_section_cannot_be_changed_after_loading() -> None:

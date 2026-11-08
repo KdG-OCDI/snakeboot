@@ -19,7 +19,7 @@ def load_configuration(*sections: type[Section], package: str) -> Configuration:
     start-up: InvalidConfigurationPropertiesError for a broken model, ConfigurationFileNotFoundError
     for a missing file, pydantic's ValidationError for a missing, unknown or invalid value.
 
-    This takes both steps at once. A Django application lets `snakeboot.django_application` take them: the
+    This takes both steps at once. An application lets `snakeboot.application` take them: the
     sections of the container are then found in its modules instead of listed.
     """
     configuration = begin_configuration(*sections, package=package)

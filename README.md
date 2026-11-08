@@ -1,59 +1,59 @@
+<p align="center">
+  <img src="https://raw.githubusercontent.com/KdG-OCDI/snakeboot/main/docs/logo.png" alt="snakeboot: a snake coiled into a boot" width="320">
+</p>
+
 # snakeboot
 
-Spring Boot ergonomics for hexagonal Python applications, wired by [wireup](https://github.com/maldoinc/wireup)
-and running on Django and Django Ninja underneath.
+Spring Boot ergonomics for hexagonal Python applications, wired by [wireup](https://github.com/maldoinc/wireup),
+with FastAPI, SQLAlchemy and Alembic underneath.
 
 snakeboot imitates the basics of Spring Boot, not Spring itself. Each part is a handful of small
 classes you can read in an afternoon, and none of them knows anything about your domain.
 
-An application speaks snakeboot, not Django: its entry points, controllers, commands, listeners and configuration
-import nothing of Django or Django Ninja, so snakeboot can bind another framework without changing them. Only the
-persistence adapters, which hold the models and queries of the ORM, and the tests that use Django's database, still
-see Django.
+An application speaks snakeboot, never the frameworks underneath: its entry points, controllers, entities,
+repositories, migrations, commands, listeners, configuration and tests import nothing of FastAPI, Starlette,
+SQLAlchemy or Alembic. snakeboot binds them, so another framework means another binding, not other applications.
 
 | snakeboot | Spring Boot | Needs |
 |---|---|---|
 | `@transactional`, `after_commit` | `@Transactional`, `@TransactionalEventListener(AFTER_COMMIT)` | nothing |
 | `@application_root`, `ComponentScan` | `@SpringBootApplication`, `@ComponentScan` | nothing |
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
-| `@rest_controller`, `@route.get(status=...)`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@ResponseStatus`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[ninja]` |
-| `Principal` | `@AuthenticationPrincipal` | `snakeboot[ninja]` |
-| `InvalidRequestError`, `RequestProblem` | `MethodArgumentNotValidException` | `snakeboot[ninja]` |
-| `ServerSentEvents`, `ServerSentEvent` | `SseEmitter`, `ServerSentEvent` | `snakeboot[ninja]` |
-| `DjangoAtomicTransactionManager` | `PlatformTransactionManager` for JDBC | `snakeboot[django]` |
-| `@configuration_properties`, `Section`, `load_configuration`, `application-<profile>.toml` | `@ConfigurationProperties`, `@ConfigurationPropertiesScan`, profiles | `snakeboot[configuration]` |
+| `@configuration_properties`, `Section`, `application-<profile>.toml` | `@ConfigurationProperties`, profiles | `snakeboot[configuration]` |
 | `ServerProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
-| `snakeboot.boot`: `run`, `wsgi_application`, `asgi_application` | `SpringApplication.run`, auto-configuration | `snakeboot[configuration,django]` |
-| `CommandLineRunner`, `CommandLineError` | `CommandLineRunner`, Spring Shell's `@Command` | `snakeboot[configuration,django]` |
-| `DjangoConfigurer`, `django_settings` | `WebMvcConfigurer` | `snakeboot[configuration,django]` |
-| `BearerAuthentication` | a `SecurityFilterChain` bean | `snakeboot[ninja]` |
-| `JwtBearerAuthentication`, `OAuth2Properties` | `spring-boot-starter-oauth2-resource-server`, `spring.security.oauth2.resourceserver.jwt.*` | `snakeboot[oauth2]` |
+| `snakeboot.boot`: `run`, `asgi_application` | `SpringApplication.run`, auto-configuration, the embedded server | `snakeboot[web]` |
+| `@rest_controller`, `@route.get(status=...)`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@ResponseStatus`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[web]` |
+| `Principal`, `BearerAuthentication` | `@AuthenticationPrincipal`, a `SecurityFilterChain` bean | `snakeboot[web]` |
+| `InvalidRequestError`, `RequestProblem` | `MethodArgumentNotValidException` | `snakeboot[web]` |
+| `ServerSentEvents`, `ServerSentEvent` | `SseEmitter`, `ServerSentEvent` | `snakeboot[web]` |
+| `@entity`, `Id`, `Column`, `Index`, `CreatedDate`, `LastModifiedDate` | `@Entity`, `@Id`, `@Column`, `@Index`, `@CreatedDate`, `@LastModifiedDate` | `snakeboot[data]` |
+| `CrudRepository`, derived queries, `@query`, `@lock`, `PageRequest` | Spring Data's `CrudRepository`, query methods, `@Query`, `@Lock`, `Pageable` | `snakeboot[data]` |
+| `migrate`, `make_migration`, `migrations/V1__*.sql` | Flyway | `snakeboot[data]` |
+| `Vector` | Spring AI's pgvector store | `snakeboot[data,vector]` |
+| `Cache`, `InMemoryCache` | Spring's `Cache`, `RedisCacheManager` | `snakeboot[cache]` for Redis |
+| `JwtBearerAuthentication`, `OAuth2Properties` | `spring-boot-starter-oauth2-resource-server` | `snakeboot[oauth2]` |
+| `CommandLineRunner`, `CommandLineError` | `CommandLineRunner`, Spring Shell's `@Command` | wireup |
 | `Lifecycle`, `ApplicationReadyEvent`, `run_lifecycle` | `SmartLifecycle`, `ApplicationReadyEvent`, an application without the web starter | wireup |
-| `@scheduled`, `SchedulingProperties` | `@Scheduled` | `snakeboot[configuration,django]` |
-| `@rabbit_listener`, `RabbitTemplate`, `RabbitProperties`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `spring.rabbitmq.*`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
+| `@scheduled`, `SchedulingProperties` | `@Scheduled` | `snakeboot[configuration]` |
+| `@rabbit_listener`, `RabbitTemplate`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
-| `snakeboot.django_ninja` | the REST API and `/health` of the application, on Django Ninja | `snakeboot[ninja]` |
-| `RecordingTransactionManager`, `declared_classes` | spring-test | nothing |
-
-The transaction, component scan and testing packages import nothing but the standard library,
-so the application layer of a hexagonal application can use `@transactional` without importing Django. The REST,
-command line, event and lifecycle packages add wireup, and no web framework: a controller or a command is a module
-that imports without Django.
+| `TestApplication`, `RecordingTransactionManager`, `declared_classes` | `@SpringBootTest`, `@AutoConfigureTestDatabase`, `TestRestTemplate`, spring-test | `snakeboot[testing]` |
 
 ## Install
 
 ```bash
-uv add "snakeboot[configuration,django,ninja]"
-uv add "snakeboot[configuration,django,ninja,rabbitmq]"   # with RabbitMQ
+uv add "snakeboot[configuration,web,data]"
+uv add "snakeboot[configuration,web,data,rabbitmq,oauth2]"   # with RabbitMQ and Keycloak's tokens
 ```
 
 ## A tour
 
 **The application.** A class marked with `@application_root`, like `@SpringBootApplication`, is the application.
 Its component scan decides what goes into the container: the package of the class, or the packages `base_packages`
-names. The scan skips the server entry points (`wsgi.py`, `asgi.py`) and migrations, and adds the components snakeboot
-provides itself (the event publisher, the lifecycle, the scheduler). `run` starts it, like `SpringApplication.run`;
-the entry points import it from `snakeboot.boot`, which stays the same whatever framework runs underneath.
+names. The scan skips the server entry points (`wsgi.py`, `asgi.py`) and adds the components snakeboot provides
+itself (the event publisher, the lifecycle, the scheduler, `run_lifecycle`). `run` runs a command, like
+`SpringApplication.run`; `asgi_application` serves the application under uvicorn. Both come from `snakeboot.boot`, the
+one place that names the frameworks underneath.
 
 ```python
 # myapp/myapp_application.py
@@ -62,16 +62,17 @@ the entry points import it from `snakeboot.boot`, which stays the same whatever 
 class MyApplication: ...
 
 
-# manage.py and myapp/__main__.py               # myapp/wsgi.py, for gunicorn
-from snakeboot.boot import run                   application = wsgi_application(MyApplication)
-                                                 # myapp/asgi.py, for uvicorn (streaming, server-sent events)
-run(MyApplication)                               application = asgi_application(MyApplication)
+# myapp/__main__.py                               # myapp/asgi.py: uvicorn myapp.asgi:application
+from snakeboot.boot import run                     application = asgi_application(MyApplication)
+
+run(MyApplication)
 ```
 
-The application writes no settings.py and no urls.py: snakeboot owns Django's settings module and builds every
-setting from the application class and its `application.toml`, next to it (`django_settings`, below). Nothing can
-change them after snakeboot. The URLs are the REST API under `/api/`, described by `@openapi_definition`, and
-`/health`.
+The application writes no settings and no URLs. `snakeboot.boot` reads `application.toml` next to the application
+class, builds wireup's container from the component scan, and adds what the tables ask for, like Spring Boot's
+conditional auto-configuration: SQLAlchemy and the transaction manager of `@transactional` with `[database]`, Redis
+with `[cache]`, RabbitMQ with `[rabbitmq]`. An application without a table imports none of those. The REST API lives
+under `/api/` (Swagger UI at `/api/docs`), next to `/health`.
 
 **Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys, the base class of every
 configuration model) is bound to one table of `application.toml`, like `@ConfigurationProperties`. A section is a
@@ -85,34 +86,18 @@ class ChatbotProperties(Section):
     llm: LanguageModelProperties  # a nested Section is the table [chatbot.llm]
 ```
 
-**Django, configured.** `django_settings(MyApplication)` builds the settings, like Spring Boot's
-auto-configuration: `SECRET_KEY`, `DEBUG`, `ALLOWED_HOSTS` and `LOGGING` from `[server]`; `DATABASES` from
-`[database]` (PostgreSQL) and `CACHES` from `[cache]` (Redis), when `application.toml` has those tables; the container
-(`WIREUP`) from the component scan; and `INSTALLED_APPS`: snakeboot, wireup and every Django `AppConfig` of the
-component scan. The scan finds them, and the models, by reading the source, so nothing is imported before Django
-starts; a model outside every app stops the start. When Django starts, `snakeboot.django_application` reads the
-sections declared in the modules of the container, checks every table and, with a database, installs the transaction
-manager of `@transactional`.
+```toml
+[server]
+debug = false
+allowed_hosts = ["*"]       # or "games.example.com", "*.example.com"
+log_level = "INFO"
 
-Django apps and middleware from outside the project come from a `DjangoConfigurer`, like a `WebMvcConfigurer`.
-snakeboot finds it in the component scan or next to the application class, as it finds an `AppConfig`, and imports
-its module while it builds the settings, so that module holds strings only:
-
-```python
-class CorsConfigurer(DjangoConfigurer):
-    installed_apps = ("corsheaders",)
-    middleware = ("corsheaders.middleware.CorsMiddleware",)  # after wireup's, before CommonMiddleware
+[database]                  # PostgreSQL; the password comes from DATABASE__PASSWORD
+host = "db"
+port = 5432
+name = "tictactoe"
+user = "tictactoe"
 ```
-
-A test that needs a double takes the settings and replaces that one setting:
-
-```python
-# settings_under_test.py, the DJANGO_SETTINGS_MODULE of the tests
-globals().update(django_settings(MyApplication))
-DATABASES = {"default": {"ENGINE": "django.db.backends.sqlite3", "NAME": ":memory:"}}
-```
-
-Without Django, `load_configuration(ChatbotProperties, package="myapp")` reads the sections it is given.
 
 The values come from three places, a later one overriding an earlier one key by key:
 
@@ -124,11 +109,54 @@ The values come from three places, a later one overriding an earlier one key by 
 
 Nothing else is read: no `.env` file, no default in code, no command line. The start stops when a model does
 not extend `Section`, changes its `model_config` or has a default; when a file or a value is missing; when a key
-or a table is unknown (a typo in `application.toml` or in `CHATBOT__LLM__MODLE`). Tables are merged, not replaced,
-so put the variant without keys of its own in `application.toml` when a profile or the environment may choose
-another.
+or a table is unknown (a typo in `application.toml` or in `CHATBOT__LLM__MODLE`). Outside an application,
+`load_configuration(ChatbotProperties, package="myapp")` reads the sections it is given.
 
-**Transactions.** A use case declares its boundary; composition chooses the technology.
+**Entities and repositories.** An entity is a plain dataclass that a table keeps, like a JPA `@Entity`; a repository is
+an interface, a Protocol that extends `CrudRepository`, which snakeboot implements when its module is imported, like
+Spring Data. Its methods are derived from their names (`find_by`, `count_by`, `exists_by`, `delete_by`, conditions
+joined by `_and_` and `_or_`, keywords such as `less_than_equal`, `in`, `is_null` and `containing`, then `order_by`);
+the return annotation says what a method returns. `@query` writes the SQL itself, `@lock` locks the rows read. A name
+snakeboot cannot read, a field the entity lacks or a parameter too many stops the start. The implementation is the
+component of the interface, so an adapter asks for the interface by type and maps its records to the domain.
+
+```python
+@entity("tictactoe_game", indexes=(Index("tictactoe_game_waiting_idx", "status", "join_deadline"),))
+@dataclass
+class GameRecord:
+    game_id: Annotated[UUID, Id()]  # Id(generated=True) for a number the database gives
+    status: Annotated[str, Column(length=16)]
+    board: list[str]  # list, dict and Any are JSON; Json() makes any field JSON
+    join_deadline: datetime | None  # with its time zone; None is an empty column
+    updated_at: Annotated[datetime | None, LastModifiedDate()] = None
+
+
+class GameRecords(CrudRepository[GameRecord, UUID], Protocol):
+    @lock(LockMode.PESSIMISTIC_WRITE)
+    def find_by_status_and_join_deadline_less_than_equal(self, status: str, deadline: datetime) -> list[GameRecord]: ...
+
+    def find_first_by_order_by_updated_at_desc(self) -> GameRecord | None: ...
+
+    def count_by_status(self, status: str) -> int: ...
+
+    @query("SELECT status, COUNT(*) AS games FROM tictactoe_game GROUP BY status")
+    def games_per_status(self) -> list[StatusCount]: ...  # any class made from the columns by name
+```
+
+`save` inserts or updates by identifier, like Spring Data's; every call joins the transaction of the running
+`@transactional`, or runs in one of its own. A last parameter of type `PageRequest` returns one page. On PostgreSQL a
+`Vector(384)` field (extra `snakeboot[vector]`) holds an embedding for pgvector's similarity search in a `@query`.
+
+**Migrations.** The schema comes from SQL scripts, like Flyway's: `V1__create_tictactoe_game.sql`,
+`V2__add_a_winner.sql` in a `migrations` directory next to the entities. `python -m myapp migrate` runs the scripts the
+database has not run, in version order, each in a transaction, remembering them with their checksum; a script that
+changed after it ran stops it, and on PostgreSQL two processes never migrate at once. `python -m myapp make_migration
+"add a winner"` writes the SQL the entities need as the next script, by letting Alembic compare them with the
+database. A migration is plain SQL, so it stays valid when the persistence framework changes.
+
+**Transactions.** A use case declares its boundary; snakeboot chooses the technology, SQLAlchemy's session when the
+application has `[database]`. A nested `@transactional` call is a savepoint; `after_commit` waits for the outermost
+commit and is dropped by a rollback.
 
 ```python
 @injectable
@@ -139,10 +167,6 @@ class CancelRegistrationUseCase:
         workshop.cancel_registration(...)
         self._workshops.save(workshop)
         self._events.publish_all(workshop.pull_events())
-
-
-# at start-up; snakeboot.django_application does this itself when the application has a database
-TransactionManagerRegistry.install(DjangoAtomicTransactionManager())
 ```
 
 **Application events.** Listeners react to facts after the commit, so a rolled-back change never
@@ -159,7 +183,7 @@ class ParticipantNotificationListener:
 ```
 
 **REST controllers.** Singleton classes with constructor injection. `ControllerScan` finds them in the modules of
-the component scan, the same modules that fill the container, and `snakeboot.django_ninja` publishes their routes.
+the component scan, the same modules that fill the container, and `snakeboot.fastapi_web` publishes their routes.
 A controller sees no request: an endpoint takes what the call carries (path and query parameters, a body as a
 Pydantic model) and returns the body, whose type is its return annotation; `status=` sets the status of the answer,
 like `@ResponseStatus`. A call that does not fit (a missing field, a wrong type) is an `InvalidRequestError`, which
@@ -187,16 +211,15 @@ class EnrollmentRestErrorAdvice:
 
     @exception_handler(InvalidRequestError, status=422)
     def answer_invalid_request(self, error: Exception) -> dict[str, str]:
-        return error_answer(error)  # {"code": "invalid_request", "detail": "body.body.title: Field required"}
+        return error_answer(error)  # {"code": "invalid_request", "detail": "body.title: Field required"}
 ```
 
 **Server-sent events.** An endpoint that returns `ServerSentEvents` streams, like one that returns Spring's
-`SseEmitter`: the web framework serves it as `text/event-stream`, uncached and unbuffered, and under ASGI a watching
-client holds no thread. `ServerSentEvents.watching` covers what most streams do: it reads a value once in the call
-(so an unknown id answers 404 as usual), then every `every`, and sends it whenever it changed, until `until` holds.
-A silence of 15 seconds gets a comment that keeps proxies open, and a stream ends after 30 minutes, when the
-browser's `EventSource` reconnects. The reads run as the framework runs synchronous code, between fresh database
-connections; `ServerSentEvents(source)` takes an async iterable of `ServerSentEvent`s for any other stream.
+`SseEmitter`: it is served as `text/event-stream`, uncached and unbuffered, and a watching client holds no thread.
+`ServerSentEvents.watching` covers what most streams do: it reads a value once in the call (so an unknown id answers
+404 as usual), then every `every`, and sends it whenever it changed, until `until` holds. A silence of 15 seconds gets
+a comment that keeps proxies open, and a stream ends after 30 minutes, when the browser's `EventSource` reconnects.
+Each read runs on the server's thread pool, in a transaction of its own.
 
 ```python
 @route.get("/games/{game_id}/events")
@@ -213,8 +236,7 @@ def watch_game(self, game_id: str) -> ServerSentEvents:
 `SecurityFilterChain` bean: its constructor receives sections and ports by type. With one in the component scan, every
 endpoint needs `Authorization: Bearer <token>`, the OpenAPI document says so, and a parameter of type `Principal`
 receives whom the token belongs to, like `@AuthenticationPrincipal`. `/health` stays open; an endpoint opts out with
-`public=True`. A public endpoint that asks for a `Principal`, or a `Principal` in an API without authentication,
-stops the start-up.
+`public=True`. A refused token answers 401 `{"detail": "Unauthorized"}`.
 
 ```python
 class KeycloakTokens(BearerAuthentication):
@@ -232,43 +254,22 @@ def register(self, workshop_id: str, participant: Principal) -> RegistrationDTO:
 ```
 
 **Tokens of an authorization server.** For the JWT access tokens of Keycloak or another OAuth2 server, extend
-`JwtBearerAuthentication` (extra `snakeboot[oauth2]`) and add the table `[oauth2]`, like Spring Boot's resource
-server. It fetches the issuer's public keys from `jwks_uri` and caches them, and accepts a token only when the
-signature, the issuer, the audience and the expiry are right; its `sub` is the principal.
+`JwtBearerAuthentication` (extra `snakeboot[oauth2]`) and add the table `[oauth2]` (`issuer_uri`, `jwks_uri`,
+`audience`), like Spring Boot's resource server. It fetches the issuer's public keys and caches them, and accepts a
+token only when the signature, the issuer, the audience and the expiry are right; its `sub` is the principal.
 
-```python
-class PlayerTokens(JwtBearerAuthentication):
-    """The access tokens that Keycloak gives the platform's players."""
-```
-
-```toml
-[oauth2]
-issuer_uri = "http://localhost:8180/realms/kareldegames"   # the `iss` of the tokens
-jwks_uri = "http://keycloak:8080/realms/kareldegames/protocol/openid-connect/certs"
-audience = "tictactoe"                                     # the `aud` the tokens must hold
-```
-
-**What runs beside the requests.** Django knows no moment "the server starts"; uvicorn does, and says so with ASGI's
-`lifespan`, which `asgi_application` answers. Then every `Lifecycle` component starts, like a `SmartLifecycle` bean,
-and `ApplicationReadyEvent` goes to the event listeners; when uvicorn stops, they stop. Management commands
-(`migrate`), WSGI and the tests start nothing. `python -m myapp run_lifecycle` runs the same lifecycle without a web
-server, until SIGTERM: a process that only listens and schedules, like Spring Boot without the web starter.
-
-```python
-@application_event_listener
-class RegisterOnStartup:
-    @event_listener(ApplicationReadyEvent)  # once, when the application has started
-    def register(self, _event: ApplicationReadyEvent) -> None: ...
-```
+**What runs beside the requests.** uvicorn says when the server starts and stops with ASGI's `lifespan`, which
+`asgi_application` answers: every `Lifecycle` component starts, like a `SmartLifecycle` bean, and
+`ApplicationReadyEvent` goes to the event listeners. Commands and tests start nothing. `python -m myapp run_lifecycle`
+runs the same lifecycle without a web server, until SIGTERM: a process that only listens and schedules, like Spring
+Boot without the web starter.
 
 **Commands.** A subclass of `CommandLineRunner` that names its command is a command of the application, like a
 `CommandLineRunner` bean: a component whose constructor receives use cases and ports, with arguments declared as with
 argparse in a classmethod, because they are parsed before the command is built: `--help` answers at once, even when
-the command depends on a server that is down. `python -m myapp self_play --games 20` starts the application and runs
-it; `python -m myapp help` lists the commands next to the framework's own (`migrate`, `run_lifecycle`), and
-`help self_play` prints its help, which is its docstring. Unlike Spring Boot, which runs every runner at each start,
-the first argument chooses one, as with Spring Shell's `@Command`.
-A `CommandLineError` stops the command with its message and exit status 1; two commands of one name stop the start.
+the command depends on a server that is down. `python -m myapp self_play --games 20` runs it; `python -m myapp help`
+lists the application's commands and snakeboot's own (`run_lifecycle`, `migrate`, `make_migration`). A
+`CommandLineError` stops the command with its message and exit status 1; two commands of one name stop the start.
 
 ```python
 class SelfPlayCommand(CommandLineRunner, command="self_play"):
@@ -284,64 +285,61 @@ class SelfPlayCommand(CommandLineRunner, command="self_play"):
 
     @override
     def run(self, arguments: Namespace) -> None:
-        if arguments.games < 1:
-            raise CommandLineError("Play at least one game.")
         print(self._self_play.execute(SelfPlayRequestDTO(games=arguments.games)))
 ```
 
 **Scheduled methods.** `@scheduled` on a method of a component runs it periodically, like `@Scheduled`: with a fixed
-rate or a fixed delay, on one thread, each run between fresh database connections. A method that raises is logged and
-runs again at its next turn. `[scheduling] auto_startup = false` keeps a process from running them.
-
-```python
-@injectable
-class AbortExpiredGamesJob:
-    @scheduled(fixed_delay=timedelta(seconds=2))
-    def abort_expired_games(self) -> None: ...
-```
+rate or a fixed delay, on one thread. A method that raises is logged and runs again at its next turn.
+`[scheduling] auto_startup = false` keeps a process from running them.
 
 **RabbitMQ.** With the table `[rabbitmq]` (extra `snakeboot[rabbitmq]`, through pika), `@rabbit_listener` makes a
 method of a component consume a queue, like `@RabbitListener` with `@QueueBinding`: the durable topic exchange, the
 queue and the binding are declared at start-up, the JSON body becomes the pydantic model, `dict` or `bytes` the method
 takes, and each listener has a thread and a connection of its own. Returning acknowledges the message;
-`RejectAndDontRequeueError` or an unreadable body refuses it for good; another failure is tried three times, a second
-apart, then refused, as Spring Boot's `retry.enabled` does. The `RabbitTemplate` sends persistent JSON, confirmed by the
-broker. `[rabbitmq.listener] auto_startup = false` keeps a process from consuming. Under uvicorn every worker process
-runs its own listeners and scheduled methods, like Spring's `concurrency`: RabbitMQ gives each message to one of them,
-and a scheduled method runs once per process.
+`RejectAndDontRequeueError` or an unreadable body refuses it for good; another failure is tried three times, then
+refused. The `RabbitTemplate` sends persistent JSON, confirmed by the broker. `[rabbitmq.listener] auto_startup =
+false` keeps a process from consuming.
 
 ```python
 @injectable
 class GameStartedListener:
-    def __init__(self, start_game: StartGameUseCase) -> None:
-        self._start_game = start_game
-
     @rabbit_listener(queue="tictactoe.game-started", exchange="games", routing_key="game.tictactoe.started")
     def on_game_started(self, message: GameStartedMessage) -> None: ...  # a pydantic model
-
-
-# an adapter that sends
-self._rabbit.convert_and_send("games", "game.tictactoe.finished", event, message_id=f"{game_id}.finished")
 ```
 
-```toml
-[rabbitmq]
-host = "rabbitmq"
-port = 5672
-username = "guest"          # the password comes from RABBITMQ__PASSWORD
-virtual_host = "/"
+**A cache.** An adapter asks for `Cache` by type: values JSON can hold, kept by key for a while. With `[cache]
+redis_url = "redis://redis:6379/1"` (extra `snakeboot[cache]`) it is Redis; a test gives an `InMemoryCache`.
 
-[rabbitmq.listener]
-auto_startup = true
+```python
+self._cache.put(question, {"text": answer, "sources": sources}, time_to_live=timedelta(hours=1))
 ```
+
+**Tests.** `TestApplication` starts the application as it runs, from its `application.toml`, with two differences, like
+`@SpringBootTest` with `@AutoConfigureTestDatabase`: `overrides` replace components with doubles, and the database is a
+fresh SQLite in memory whose tables come from the entities. `client()` calls the REST API in the same process, like
+`TestRestTemplate`; used as a context manager, the lifecycle runs around it.
+
+```python
+def test_a_started_game_can_be_read() -> None:
+    with TestApplication.start(TictactoeApplication, overrides={GamePlatformPort: FakePlatform()}) as app:
+        client = app.client()
+        created = client.post("/api/tictactoe/games", json={"players": ["ann", "bob"]})
+
+        assert client.get(f"/api/tictactoe/games/{created.json()['game_id']}").status_code == 200
+        assert app.get(GameRecords).count() == 1
+```
+
+`RecordingTransactionManager` runs `@transactional` use cases without a database, and `declared_classes` lets an
+architecture test compare what the source declares with what the component scan found.
 
 ## Design rules
 
 * Imitate the basics, not all of Spring: no AOP, no cron, no message broker other than RabbitMQ.
-* Fail at start-up, not at the first request: a broken controller, command, listener, root or configuration stops the
-  application.
-* An application imports snakeboot, not the framework underneath: only the `django*` packages of snakeboot know Django
-  or Django Ninja, so another framework means another binding, not other applications.
+* Fail at start-up, not at the first request: a broken controller, repository, command, listener, root or
+  configuration stops the application.
+* An application imports snakeboot, never the framework underneath: only `snakeboot.fastapi_web`,
+  `snakeboot.sqlalchemy_data`, `snakeboot.redis_cache` and `snakeboot.boot` know FastAPI, SQLAlchemy, Alembic or Redis,
+  so another framework means another binding, not other applications.
 * Each package knows as little as possible; `uv run lint-imports` enforces it.
 
 ## Develop
@@ -352,4 +350,12 @@ uv run pre-commit install
 uv run pytest            # tests, including the import contracts
 uv run ruff check        # Clean Code rules
 uv run mypy              # strict
+```
+
+The PostgreSQL tests (migrations, JSONB, pgvector) run when `SNAKEBOOT_TEST_POSTGRESQL_URL` names a database they may
+fill and empty:
+
+```bash
+docker run -d --rm -p 55432:5432 -e POSTGRES_PASSWORD=snakeboot pgvector/pgvector:pg17
+SNAKEBOOT_TEST_POSTGRESQL_URL=postgresql+psycopg://postgres:snakeboot@localhost:55432/postgres uv run pytest
 ```

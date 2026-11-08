@@ -1,5 +1,5 @@
 class CommandLineError(Exception):
-    """Raised by a command to stop with a message and exit status 1, like Django's `CommandError`.
+    """Raised by a command to stop with a message and exit status 1, like Spring Shell's `CommandExecutionException`.
 
     The message is for whoever typed the command: what was wrong with the arguments, or why the work cannot be done.
     Any other exception is a bug and stops the command with its traceback.

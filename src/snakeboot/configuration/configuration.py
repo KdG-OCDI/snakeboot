@@ -9,7 +9,7 @@ from snakeboot.configuration.configuration_sources import ConfigurationSources, 
 from snakeboot.configuration.section import Section
 
 CONFIGURATION_KEY: Final = "CONFIGURATION"
-"""The key of the container's config that holds the `Configuration`: in a Django application, the setting of that name.
+"""The key of the container's config that holds the `Configuration`.
 
 The provider of every section reads it there, so the container needs no list of sections.
 """
@@ -49,7 +49,7 @@ class Configuration:
     def complete(self, *sections: type[Section]) -> None:
         """Reads the configuration again with `sections` added, and refuses a table that no section claims.
 
-        This is the second step, taken once: `snakeboot.django_application` takes it when Django starts, with the
+        This is the second step, taken once: `snakeboot.application` takes it when it builds the container, with the
         sections declared in the modules of the container.
         """
         if self._complete:
@@ -73,7 +73,7 @@ class Configuration:
         if not self._complete:
             return (
                 f"{section.__name__} is not read yet: the sections of the container are read when it is built "
-                "(Configuration.complete; snakeboot.django_application does it when Django starts)."
+                "(Configuration.complete; snakeboot.application does it when it builds the container)."
             )
         return (
             f"{section.__name__} is not a section of this configuration: no module of the container declares it, "

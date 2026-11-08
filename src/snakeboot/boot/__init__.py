@@ -1,16 +1,16 @@
-"""How an application starts, whatever runs underneath, like Spring Boot's `SpringApplication.run`.
+"""Where an application starts, like Spring Boot's `SpringApplication`: `run` for its commands, `asgi_application` for
+its server.
 
-    # myapp/__main__.py and manage.py              # myapp/asgi.py, for uvicorn
-    run(MyApplication)                             application = asgi_application(MyApplication)
-                                                   # myapp/wsgi.py, for gunicorn
-                                                   application = wsgi_application(MyApplication)
+    # myapp/__main__.py                       # myapp/asgi.py, for uvicorn myapp.asgi:application
+    from snakeboot.boot import run            from snakeboot.boot import asgi_application
+    run(MyApplication)                        application = asgi_application(MyApplication)
 
-These are the only names an application's entry points import. `run` runs a command: one of the application's
-`CommandLineRunner`s, or one of the framework's own (`migrate`, `runserver`). Today the application starts on Django
-(`snakeboot.django_application`); another framework would change this module, not the applications
-(extras: snakeboot[configuration,django]).
+The one place that names the frameworks underneath: FastAPI serves the REST API, SQLAlchemy keeps the entities when
+the configuration has `[database]`, pika talks to RabbitMQ when it has `[rabbitmq]`, Redis caches when it has
+`[cache]`. An application imports this package and never those frameworks, so a binding to another one changes no
+application.
 """
 
-from snakeboot.django_application.entry_points import asgi_application, run, wsgi_application
+from snakeboot.boot.entry_points import CONDITIONAL_MODULES, asgi_application, run
 
-__all__ = ["asgi_application", "run", "wsgi_application"]
+__all__ = ["CONDITIONAL_MODULES", "asgi_application", "run"]

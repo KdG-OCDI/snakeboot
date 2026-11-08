@@ -13,8 +13,8 @@ from snakeboot.configuration import (
 from tests.configuration.sample_service.greeting_properties import GreetingProperties
 
 SAMPLE = "tests.configuration.sample_service"
-DJANGO_SERVICE = "tests.configuration.django_service"
-DJANGO_SECTIONS = (DatabaseProperties, CacheProperties)
+INFRASTRUCTURE_SERVICE = "tests.configuration.infrastructure_service"
+INFRASTRUCTURE_SECTIONS = (DatabaseProperties, CacheProperties)
 
 
 def test_the_first_step_leaves_the_tables_of_the_container_for_later() -> None:
@@ -56,7 +56,9 @@ def test_a_section_known_from_the_first_step_may_be_named_again() -> None:
 
 
 def test_an_optional_section_is_read_when_its_table_is_there() -> None:
-    configuration = begin_configuration(ServerProperties, optional=DJANGO_SECTIONS, package=DJANGO_SERVICE)
+    configuration = begin_configuration(
+        ServerProperties, optional=INFRASTRUCTURE_SECTIONS, package=INFRASTRUCTURE_SERVICE
+    )
     configuration.complete()
 
     assert configuration.get(DatabaseProperties).host == "db"
@@ -64,7 +66,7 @@ def test_an_optional_section_is_read_when_its_table_is_there() -> None:
 
 
 def test_an_optional_section_without_a_table_is_absent() -> None:
-    configuration = begin_configuration(ServerProperties, optional=DJANGO_SECTIONS, package=SAMPLE)
+    configuration = begin_configuration(ServerProperties, optional=INFRASTRUCTURE_SECTIONS, package=SAMPLE)
     configuration.complete(GreetingProperties)
 
     assert DatabaseProperties not in configuration.sections
@@ -76,4 +78,4 @@ def test_an_optional_table_that_is_only_partly_there_stops_the_start(monkeypatch
     monkeypatch.setenv("DATABASE__PASSWORD", "set-by-compose")  # the other keys of [database] are missing
 
     with pytest.raises(ValidationError, match=r"database\.host"):
-        begin_configuration(ServerProperties, optional=DJANGO_SECTIONS, package=SAMPLE)
+        begin_configuration(ServerProperties, optional=INFRASTRUCTURE_SECTIONS, package=SAMPLE)

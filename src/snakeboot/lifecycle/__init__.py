@@ -12,8 +12,8 @@
         def register(self, event: ApplicationReadyEvent) -> None: ...
 
 The lifecycle runs when an ASGI server starts the application (`asgi_application`, which answers uvicorn's
-`lifespan`) or when `run_lifecycle` runs it without a web server. Django management commands such as `migrate` and
-the tests start nothing. `@scheduled` methods and `@rabbit_listener` methods run through it.
+`lifespan`) or when `run_lifecycle` runs it without a web server. Other commands, such as `migrate`, and the
+tests start nothing. `@scheduled` methods and `@rabbit_listener` methods run through it.
 """
 
 from snakeboot.lifecycle.application_components import ApplicationComponents

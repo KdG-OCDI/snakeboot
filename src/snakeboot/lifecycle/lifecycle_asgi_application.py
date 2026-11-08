@@ -13,7 +13,7 @@ type Send = Callable[[Message], Awaitable[None]]
 
 
 class AsgiApplication(Protocol):
-    """Anything an ASGI server can call, such as Django's `ASGIHandler`."""
+    """Anything an ASGI server can call, such as a FastAPI application."""
 
     def __call__(self, scope: Any, receive: Any, send: Any) -> Awaitable[None]:
         """Handles one connection."""
@@ -22,8 +22,8 @@ class AsgiApplication(Protocol):
 class LifecycleAsgiApplication:
     """An ASGI application that starts the application's lifecycle with the server and stops it with the server.
 
-    Django knows no moment "the server starts"; the ASGI server does, and says so with the `lifespan` scope, which
-    Django's handler refuses. This application answers that scope itself and hands every other one to the handler
+    The application knows no moment "the server starts"; the ASGI server does, and says so with the `lifespan`
+    scope. This application answers that scope itself and hands every other one to the handler
     unchanged. The lifecycle starts on a thread, as it may block (opening connections, registering with a platform);
     a failure answers `lifespan.startup.failed`, so the server stops instead of serving a half-started application.
     """

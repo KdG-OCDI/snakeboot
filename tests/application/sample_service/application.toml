@@ -1,0 +1,12 @@
+[server]
+debug = false
+allowed_hosts = ["*"]
+log_level = "WARNING"
+
+# A local PostgreSQL; TestApplication replaces it with a database in memory.
+[database]
+host = "localhost"
+port = 55432
+name = "snakeboot"
+user = "snakeboot"
+password = "snakeboot"

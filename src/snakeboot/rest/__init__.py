@@ -23,7 +23,7 @@
 A controller sees no request and no response object: it takes what the call carries (path, query and body
 parameters, the body as a Pydantic model) and a `Principal`, and returns the body, or `ServerSentEvents` to stream.
 `ControllerScan` finds every controller, advice and `BearerAuthentication` of the component scan and checks them;
-the binding of a web framework (`snakeboot.django_ninja`, today) publishes them, so another binding changes no
+the binding of a web framework (`snakeboot.fastapi_web`, today) publishes them, so another binding changes no
 controller.
 
 It knows wireup, the component scan and Pydantic's JSON, but no web framework and nothing of the application.

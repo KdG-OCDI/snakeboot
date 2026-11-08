@@ -1,7 +1,63 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.7,<0.8`.
+a minor release may break the API: pin `snakeboot>=0.8,<0.9`.
+
+## Unreleased
+
+snakeboot runs on FastAPI, SQLAlchemy and Alembic instead of Django, and an application sees none of them: its
+entities, repositories, migrations and tests are in snakeboot's terms now too. 0.7 stays on the branch `release-0.7`.
+
+- `snakeboot.application`: the application context, like Spring's `ApplicationContext`. It reads the configuration,
+  builds wireup's container from the component scan, installs the transaction manager when there is a database, and
+  runs the commands; it knows no framework. `snakeboot.boot` names the bindings: FastAPI for the REST API, SQLAlchemy
+  with `[database]`, Redis with `[cache]`, RabbitMQ with `[rabbitmq]`. An application without a table imports none of
+  them, and `python -m myapp help` answers without loading a web framework.
+- `snakeboot.fastapi_web`: the REST API on FastAPI, under /api with Swagger UI at /api/docs and /health beside it.
+  Controllers, advices, `Principal`, `BearerAuthentication`, `InvalidRequestError` and `ServerSentEvents` work as
+  they did; a stream is documented as `text/event-stream`. `[server] allowed_hosts` is enforced by Starlette's
+  `TrustedHostMiddleware` (`*`, `games.example.com`, `*.example.com`).
+- `snakeboot.data`: entities and repositories, like Spring Data. `@entity` on a dataclass, with `Id`, `Column`,
+  `Index`, `CreatedDate`, `LastModifiedDate`, `Json` (any JSON value; `Any` is JSON too) and `Vector`; `CrudRepository[E, ID]` interfaces whose methods are
+  derived from their names (`find_by_status_and_join_deadline_less_than_equal`, `find_top_100_by_..._order_by_id_asc`,
+  `count_by`, `exists_by`, `delete_by`, a `PageRequest`), `@query` for SQL, `@lock` for `SELECT ... FOR UPDATE`.
+  snakeboot implements an interface when its module is imported; a method it cannot implement stops the start.
+- `snakeboot.sqlalchemy_data` (extra `data`): the entities mapped to SQLAlchemy without the classes knowing it,
+  `@transactional` on SQLAlchemy's session (a nested call is a savepoint), and migrations as plain SQL scripts next to
+  the entities, like Flyway: `python -m myapp migrate` runs them once each, `python -m myapp make_migration "..."`
+  writes the next one from what Alembic finds missing. PostgreSQL through psycopg; pgvector with the extra `vector`.
+- `snakeboot.cache` and `snakeboot.redis_cache` (extra `cache`): a `Cache` of JSON values, in Redis with `[cache]`, in
+  memory for a test.
+- `snakeboot.boot.testing.TestApplication`: starts the application as it runs, with doubles for components and a
+  database in memory whose tables come from the entities, and calls its REST API in the same process, like
+  `@SpringBootTest` with `@AutoConfigureTestDatabase` and `TestRestTemplate`. Every test gets a fresh application.
+- `run_lifecycle` is a `CommandLineRunner` of snakeboot's, and `help` lists snakeboot's commands apart from the
+  application's.
+- `ApplicationComponents` finds marked classes too, and `get` takes abstract classes and Protocols as mypy expects.
+- wireup 2.13.1 or later: 2.13.0 cannot build a container in which a component depends on the event publisher of
+  an application without listeners.
+- Gone: `snakeboot.django`, `snakeboot.django_application`, `snakeboot.django_ninja`, `wsgi_application`,
+  `DjangoConfigurer`, `ComponentScan.classes_extending`, the extras `django` and `ninja`, and `[server] secret_key`.
+
+Moving an application from 0.7:
+
+| 0.7 | 0.8 |
+|---|---|
+| `snakeboot[configuration,django,ninja]` | `snakeboot[configuration,web,data]` (+ `vector`, `cache`, `testing`) |
+| `wsgi_application(MyApplication)` under gunicorn | `asgi_application(MyApplication)` under uvicorn |
+| `[server] secret_key`, `SERVER__SECRET_KEY` | nothing |
+| a Django model in an app with an `AppConfig` | an `@entity` dataclass, with the same table and index names |
+| `Model.objects.filter(...)`, `select_for_update()`, `save()` | a `CrudRepository` interface: derived methods, `@lock`, `save` |
+| `CosineDistance`, `annotate`, `values` | `@query("... embedding <=> CAST(:embedding AS vector) ...")` |
+| `auto_now`, `auto_now_add` | `LastModifiedDate()`, `CreatedDate()` |
+| `transaction.atomic()` in an adapter | `@transactional` |
+| Django migrations, `python -m myapp migrate` | `migrations/V1__....sql` next to the entities, `python -m myapp migrate` |
+| `makemigrations` | `python -m myapp make_migration "description"` |
+| `django.core.cache.caches["default"]` | an injected `Cache` |
+| pytest-django, `settings_under_test.py`, `django_db` | `TestApplication.start(MyApplication, overrides={...})` |
+| `django.test.Client`, `get_app_container().override(...)` | `app.client()`, `overrides=` |
+| a 422's `loc` `["body", "body", "title"]` | `["body", "title"]` |
+| `python -m myapp runserver` | `uvicorn myapp.asgi:application --reload` |
 
 ## 0.7.0
 

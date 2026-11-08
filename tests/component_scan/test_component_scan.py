@@ -45,7 +45,7 @@ def test_the_defaults_can_be_turned_off() -> None:
 
 
 def test_finding_the_names_imports_nothing() -> None:
-    """The sample wsgi.py raises when imported, as a real one would start Django."""
+    """The sample wsgi.py raises when imported, as a real one would start the application."""
     names = ComponentScan((PROJECT,), default_exclude=()).module_names()
 
     assert f"{PROJECT}.wsgi" in names
@@ -94,33 +94,3 @@ def test_the_auto_configuration_can_be_turned_off() -> None:
 
 def test_an_auto_configured_module_is_listed_once_even_when_scanned_as_well() -> None:
     assert ComponentScan(("snakeboot.events",)).module_names().count(PUBLISHER) == 1
-
-
-DJANGO_PROJECT = "tests.component_scan.sample_django_project"
-
-
-def test_lists_the_classes_whose_base_is_written_with_or_without_its_module() -> None:
-    assert ComponentScan((DJANGO_PROJECT,)).classes_extending("AppConfig") == [
-        f"{DJANGO_PROJECT}.cli.apps.NotesCliConfig",
-        f"{DJANGO_PROJECT}.persistence.apps.NotesPersistenceConfig",
-    ]
-
-
-def test_lists_only_the_classes_that_name_the_base_themselves() -> None:
-    assert ComponentScan((DJANGO_PROJECT,)).classes_extending("Model") == [
-        f"{DJANGO_PROJECT}.persistence.models.NoteOrmEntity"
-    ]
-
-
-def test_finding_the_classes_extending_a_base_imports_nothing() -> None:
-    """The sample models.py raises when imported, as a real one would before Django has started."""
-    ComponentScan((DJANGO_PROJECT,)).classes_extending("Model")
-
-    assert f"{DJANGO_PROJECT}.persistence.models" not in sys.modules
-    assert f"{DJANGO_PROJECT}.persistence.apps" not in sys.modules
-
-
-def test_a_project_without_such_classes_has_none() -> None:
-    scan = ComponentScan((PROJECT,))
-
-    assert (scan.classes_extending("AppConfig"), scan.classes_extending("Model")) == ([], [])

@@ -1,0 +1,4 @@
+[server]
+debug = false
+allowed_hosts = ["*"]
+log_level = "WARNING"

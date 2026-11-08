@@ -103,15 +103,13 @@ jobs:
 
       - name: Import every package
         run: |
-          uv run --no-project --python 3.13 --with "$(ls smoke/snakeboot-*.whl)[configuration,django,ninja,oauth2,rabbitmq]" python -c "
-          import django
-          from django.conf import settings
-          settings.configure()
-          django.setup()
-          import snakeboot.component_scan, snakeboot.django, snakeboot.events
+          uv run --no-project --python 3.13 --with "$(ls smoke/snakeboot-*.whl)[configuration,web,data,vector,cache,oauth2,rabbitmq,testing]" python -c "
+          import snakeboot.component_scan, snakeboot.events, snakeboot.application
           import snakeboot.configuration, snakeboot.rest, snakeboot.testing, snakeboot.transaction, snakeboot.oauth2
-          import snakeboot.lifecycle, snakeboot.scheduling, snakeboot.rabbitmq
-          import snakeboot.boot, snakeboot.command_line, snakeboot.django_ninja
+          import snakeboot.lifecycle, snakeboot.scheduling, snakeboot.rabbitmq, snakeboot.data, snakeboot.cache
+          import snakeboot.boot, snakeboot.boot.testing, snakeboot.command_line, snakeboot.fastapi_web
+          import snakeboot.sqlalchemy_data.sqlalchemy_data_injectable, snakeboot.sqlalchemy_data.migration_commands
+          import snakeboot.redis_cache.redis_cache_injectable
           from snakeboot.component_scan import SNAKEBOOT_AUTO_CONFIGURATION
           import importlib
           for module in SNAKEBOOT_AUTO_CONFIGURATION:

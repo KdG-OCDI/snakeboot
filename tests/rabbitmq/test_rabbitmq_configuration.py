@@ -4,9 +4,9 @@ import pytest
 import wireup
 from wireup import injectable
 
+from snakeboot.application import ApplicationContext
+from snakeboot.boot import CONDITIONAL_MODULES
 from snakeboot.configuration import RabbitProperties
-from snakeboot.django_application import django_settings
-from snakeboot.django_application.django_settings import RABBITMQ_AUTO_CONFIGURATION
 from snakeboot.lifecycle import ApplicationComponents, Lifecycle, TaskDecorator
 from snakeboot.rabbitmq import RabbitConnectionFactory, RabbitListenerContainers, RabbitTemplate
 from snakeboot.rabbitmq.rabbitmq_injectable import (
@@ -14,7 +14,7 @@ from snakeboot.rabbitmq.rabbitmq_injectable import (
     rabbit_listener_containers,
     rabbit_template,
 )
-from tests.django_application.service.applications import ServiceApplication
+from tests.command_line.sample_commands.applications import ApplicationWithoutCommands
 from tests.rabbitmq.stand_ins import rabbit_properties
 from tests.scheduling.stand_ins import CountingTaskDecorator, ScannedComponents
 
@@ -45,11 +45,18 @@ def test_an_application_with_the_section_has_rabbitmq_in_its_container(monkeypat
     for name, value in BROKER.items():
         monkeypatch.setenv(name, value)
 
-    assert RABBITMQ_AUTO_CONFIGURATION in django_settings(ServiceApplication)["WIREUP"].injectables
+    assert RABBITMQ_AUTO_CONFIGURATION in modules_of(ApplicationWithoutCommands)
 
 
 def test_an_application_without_the_section_has_no_rabbitmq_in_its_container() -> None:
-    assert RABBITMQ_AUTO_CONFIGURATION not in django_settings(ServiceApplication)["WIREUP"].injectables
+    assert RABBITMQ_AUTO_CONFIGURATION not in modules_of(ApplicationWithoutCommands)
+
+
+RABBITMQ_AUTO_CONFIGURATION = "snakeboot.rabbitmq.rabbitmq_injectable"
+
+
+def modules_of(application: type) -> list[str]:
+    return ApplicationContext.of(application, CONDITIONAL_MODULES).scan.module_names()
 
 
 def test_wireup_provides_the_template_and_the_listener_containers() -> None:

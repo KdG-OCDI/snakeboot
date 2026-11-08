@@ -1,5 +1,4 @@
 [server]
-secret_key = "test-only-secret"
 debug = false
 allowed_hosts = ["greeting.example"]
 log_level = "INFO"

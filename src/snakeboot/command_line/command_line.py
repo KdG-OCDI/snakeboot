@@ -2,10 +2,14 @@ import inspect
 import sys
 from argparse import ArgumentParser, RawDescriptionHelpFormatter
 from collections.abc import Callable, Mapping, Sequence
+from typing import Final
 
 from snakeboot.command_line.command_line_errors import CommandLineError, InvalidCommandLineRunnerError
 from snakeboot.command_line.command_line_runner import COMMAND_ATTRIBUTE, CommandLineRunner
 from snakeboot.component_scan import ComponentScan
+
+SNAKEBOOT_PACKAGE: Final = "snakeboot."
+"""Commands from a module below it are snakeboot's own, such as `run_lifecycle` and `migrate`."""
 
 
 def command_line_runners(component_scan: ComponentScan) -> dict[str, type[CommandLineRunner]]:
@@ -48,12 +52,19 @@ def run_command[R: CommandLineRunner](
 
 
 def commands_help(runners: Mapping[str, type[CommandLineRunner]]) -> str:
-    """Lists the commands of the application with the first line of their help, for the help of the program."""
-    if not runners:
-        return ""
-    width = max(len(command) for command in runners) + 2
-    lines = [f"    {command:<{width}}{_summary_of(runners[command])}".rstrip() for command in sorted(runners)]
-    return "\n".join(["", "[application]", *lines, ""])
+    """Lists the commands with the first line of their help, the application's apart from snakeboot's own."""
+    width = max((len(command) for command in runners), default=0) + 2
+    groups: dict[str, list[str]] = {"application": [], "snakeboot": []}
+    for command in sorted(runners):
+        runner = runners[command]
+        group = "snakeboot" if runner.__module__.startswith(SNAKEBOOT_PACKAGE) else "application"
+        groups[group].append(f"    {command:<{width}}{_summary_of(runner)}".rstrip())
+    return "".join(_group_help(group, lines) for group, lines in groups.items() if lines)
+
+
+def _group_help(group: str, lines: list[str]) -> str:
+    listed = "\n".join(lines)
+    return f"\n[{group}]\n{listed}\n"
 
 
 def _help_of(runner_class: type[CommandLineRunner]) -> str | None:

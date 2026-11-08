@@ -5,7 +5,6 @@ from typing import override
 
 import pytest
 import wireup
-from wireup import injectable
 
 from snakeboot.command_line import (
     CommandLineRunner,
@@ -38,7 +37,7 @@ def test_a_subclass_that_names_its_command_is_a_component() -> None:
 
 
 def test_its_constructor_receives_its_dependencies_from_the_container() -> None:
-    container = wireup.create_sync_container(injectables=[injectable(Journal), GreetCommand])
+    container = wireup.create_sync_container(injectables=[Journal, GreetCommand])
 
     command = container.get(GreetCommand)
     command.run(Namespace(name="Ann", times=1))

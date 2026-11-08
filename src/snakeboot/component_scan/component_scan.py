@@ -1,4 +1,3 @@
-import ast
 import importlib
 import importlib.util
 import inspect
@@ -101,19 +100,6 @@ class ComponentScan:
         scanned = self._scanned_files().keys()
         return sorted({name for name in (*scanned, *self.auto_configuration) if not self.is_excluded(name)})
 
-    def classes_extending(self, base: str) -> list[str]:
-        """Returns the dotted path of every class under the base packages whose base is written `base`, sorted.
-
-        `base` is a class name: `AppConfig` matches `class X(AppConfig)` and `class X(apps.AppConfig)`. Only the
-        source is read, so this works before anything is imported, and a subclass of a subclass of `base` does not
-        count.
-        """
-        return sorted(
-            f"{module_name}.{declared}"
-            for module_name, path in self._scanned_files().items()
-            for declared in _classes_in(path, extending=base)
-        )
-
     def classes_marked(self, marker: str) -> list[type]:
         """Imports the scanned modules and returns every class defined in them that carries `marker` itself.
 
@@ -149,7 +135,7 @@ class ComponentScan:
     def is_excluded(self, module_name: str) -> bool:
         """Tells whether a default or an own exclusion pattern matches the module or one of its parent packages.
 
-        A pattern is a dotted name with `fnmatch` wildcards: `myapp.composition.django_project`
+        A pattern is a dotted name with `fnmatch` wildcards: `myapp.composition.legacy`
         excludes that package and everything below it, `*.migrations` every migrations package.
         """
         return any(
@@ -184,19 +170,3 @@ def _classes_defined_in(modules: list[ModuleType]) -> Iterator[type]:
         for candidate in vars(module).values():
             if isinstance(candidate, type) and candidate.__module__ == module.__name__:
                 yield candidate
-
-
-def _classes_in(path: Path, *, extending: str) -> Iterator[str]:
-    # Only the source is read: a module may need a framework that has not started yet.
-    if path.suffix != ".py" or not path.is_file():
-        return
-    for node in ast.parse(path.read_text(encoding="utf-8"), filename=str(path)).body:
-        if isinstance(node, ast.ClassDef) and extending in (_written_name(base) for base in node.bases):
-            yield node.name
-
-
-def _written_name(base: ast.expr) -> str:
-    # `AppConfig` and `apps.AppConfig` both name the class AppConfig.
-    if isinstance(base, ast.Attribute):
-        return base.attr
-    return base.id if isinstance(base, ast.Name) else ""

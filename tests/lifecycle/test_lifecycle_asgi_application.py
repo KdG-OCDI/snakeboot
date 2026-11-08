@@ -1,16 +1,14 @@
-"""The ASGI application answers uvicorn's lifespan with the lifecycle and hands every request to Django's handler."""
+"""The ASGI application answers uvicorn's lifespan with the lifecycle and hands every request to the web framework."""
 
 import asyncio
 from typing import Any
-
-from asgiref.testing import ApplicationCommunicator
 
 from snakeboot.lifecycle import ApplicationLifecycle, LifecycleAsgiApplication
 from tests.lifecycle.sample_components import Journal, Recording
 
 
 class RecordingHandler:
-    """Stands in for Django's ASGIHandler: remembers the scopes it was handed."""
+    """Stands in for the web framework's ASGI application: remembers the scopes it was handed."""
 
     def __init__(self) -> None:
         self.scopes: list[dict[str, Any]] = []
@@ -27,12 +25,15 @@ def application_with(lifecycle: ApplicationLifecycle, handler: RecordingHandler 
 
 
 async def lifespan(application: Any, *messages: str) -> list[dict[str, Any]]:
-    communicator = ApplicationCommunicator(application, {"type": "lifespan"})
+    # Plays uvicorn: hands the application one message after another and collects its answers.
+    inbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    outbox: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
+    running = asyncio.create_task(application({"type": "lifespan"}, inbox.get, outbox.put))
     answers = []
     for message in messages:
-        await communicator.send_input({"type": message})
-        answers.append(await communicator.receive_output(timeout=5))
-    await communicator.wait(timeout=5)
+        await inbox.put({"type": message})
+        answers.append(await asyncio.wait_for(outbox.get(), timeout=5))
+    await asyncio.wait_for(running, timeout=5)
     return answers
 
 
@@ -60,6 +61,6 @@ def test_every_other_scope_goes_to_the_handler_unchanged() -> None:
     application = application_with(ApplicationLifecycle([], on_ready=lambda: None), handler)
     scope = {"type": "http", "path": "/health"}
 
-    asyncio.run(ApplicationCommunicator(application, scope).wait(timeout=5))
+    asyncio.run(application(scope, None, None))
 
     assert handler.scopes == [scope]

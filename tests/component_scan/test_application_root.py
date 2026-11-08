@@ -23,7 +23,7 @@ class ApplicationWithOwnExclusions:
     pass
 
 
-@application_root(base_packages=("tests.component_scan.sample_project", "tests.component_scan.sample_django_project"))
+@application_root(base_packages=("tests.component_scan.sample_project", "tests.rest.sample_controllers"))
 class ApplicationOfOtherPackages:
     pass
 
@@ -82,7 +82,7 @@ def test_a_class_in_a_package_init_scans_that_package() -> None:
 def test_base_packages_name_the_packages_of_the_container_instead() -> None:
     assert ComponentScan.of(ApplicationOfOtherPackages).base_packages == (
         "tests.component_scan.sample_project",
-        "tests.component_scan.sample_django_project",
+        "tests.rest.sample_controllers",
     )
 
 

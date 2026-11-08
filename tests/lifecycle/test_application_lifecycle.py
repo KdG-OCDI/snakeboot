@@ -7,7 +7,7 @@ import pytest
 import wireup
 from wireup import injectable
 
-from snakeboot.django_application.management.commands.run_lifecycle import run_until
+from snakeboot.application.run_lifecycle_command import run_until
 from snakeboot.events import ApplicationEventPublisher, application_event_listener, event_listener
 from snakeboot.events.application_event_publisher_injectable import application_event_publisher
 from snakeboot.lifecycle import ApplicationLifecycle, ApplicationReadyEvent

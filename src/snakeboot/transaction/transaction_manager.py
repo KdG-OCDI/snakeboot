@@ -7,7 +7,7 @@ class TransactionManager(ABC):
     """Opens a transaction in a concrete technology, like Spring's PlatformTransactionManager.
 
     `@transactional` and `after_commit` only know this abstraction. Composition installs
-    the concrete manager (Django's `atomic` in production, a recording fake in tests), so
+    the concrete manager (SQLAlchemy's transactions in production, a recording fake in tests), so
     use cases declare transaction behaviour without depending on the persistence technology.
     """
 

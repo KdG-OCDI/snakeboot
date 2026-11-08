@@ -1,0 +1,14 @@
+[server]
+debug = false
+allowed_hosts = ["*"]
+log_level = "INFO"
+
+[database]
+host = "db"
+port = 5432
+name = "app"
+user = "app"
+password = "test-only-password"
+
+[cache]
+redis_url = "redis://redis:6379/1"

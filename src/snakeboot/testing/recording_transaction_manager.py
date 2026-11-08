@@ -40,7 +40,7 @@ class RecordingTransactionManager(TransactionManager):
     def _execute_robustly(self, callback: Callable[[], None]) -> None:
         try:
             callback()
-        except Exception as error:  # noqa: BLE001 - like Django's robust on_commit, any callback error is recorded
+        except Exception as error:  # noqa: BLE001  # reason: like a robust after-commit callback, any error is recorded
             self.callback_errors.append(error)
 
     @contextmanager

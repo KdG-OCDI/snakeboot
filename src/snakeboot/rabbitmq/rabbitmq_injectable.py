@@ -1,6 +1,6 @@
 """Registers the connection factory, the RabbitTemplate and the listener containers with wireup.
 
-`snakeboot.django_application` adds this module to the container only when the application has a `[rabbitmq]`
+`snakeboot.boot` adds this module to the container only when the application has a `[rabbitmq]`
 section, like Spring Boot's `RabbitAutoConfiguration` with its conditions: an application without the section needs
 neither pika nor a broker.
 """
