@@ -1,7 +1,25 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.8,<0.9`.
+a minor release may break the API: pin `snakeboot>=0.9,<0.10`.
+
+## Unreleased
+
+- `python -m myapp serve` starts the web server, like the server Spring Boot embeds: uvicorn, where `[server] host`
+  and `port` say, with `[server] workers` processes, each building the application and its lifecycle; `--reload`
+  restarts it when a source file changes. An application needs no asgi.py any more, and a Dockerfile names no server.
+  `asgi_application` stays, for a deployment that runs an ASGI server of its own.
+- `[server]` has `host`, `port` and `workers`, which every application writes (`host = "0.0.0.0"`, `port = 8000`,
+  `workers = 1` say).
+- The application context is a component of its own container, under `ApplicationContext`.
+
+Moving an application from 0.8:
+
+| 0.8 | 0.9 |
+|---|---|
+| `myapp/asgi.py` with `application = asgi_application(MyApplication)` | nothing |
+| `uvicorn myapp.asgi:application --host 0.0.0.0 --port 8000 --workers 2` | `python -m myapp serve`, with `[server] host`, `port` and `workers` |
+| `uvicorn myapp.asgi:application --reload` | `python -m myapp serve --reload` |
 
 ## 0.8.0
 

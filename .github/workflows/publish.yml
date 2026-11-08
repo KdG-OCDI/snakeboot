@@ -107,7 +107,8 @@ jobs:
           import snakeboot.component_scan, snakeboot.events, snakeboot.application
           import snakeboot.configuration, snakeboot.rest, snakeboot.testing, snakeboot.transaction, snakeboot.oauth2
           import snakeboot.lifecycle, snakeboot.scheduling, snakeboot.rabbitmq, snakeboot.data, snakeboot.cache
-          import snakeboot.boot, snakeboot.boot.testing, snakeboot.command_line, snakeboot.fastapi_web
+          import snakeboot.boot, snakeboot.boot.testing, snakeboot.boot.serve_command, snakeboot.command_line
+          import snakeboot.fastapi_web
           import snakeboot.sqlalchemy_data.sqlalchemy_data_injectable, snakeboot.sqlalchemy_data.migration_commands
           import snakeboot.redis_cache.redis_cache_injectable
           from snakeboot.component_scan import SNAKEBOOT_AUTO_CONFIGURATION

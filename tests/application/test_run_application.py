@@ -44,6 +44,7 @@ def test_the_help_lists_the_application_s_commands_and_snakeboot_s(capsys: pytes
     assert help_text.startswith("usage: myapp <command> [arguments]\n")
     assert "\n[application]\n    greet " in help_text
     assert "\n[snakeboot]\n    run_lifecycle " in help_text
+    assert "\n    serve " in help_text
 
 
 def test_without_a_command_the_help_answers(capsys: pytest.CaptureFixture[str]) -> None:

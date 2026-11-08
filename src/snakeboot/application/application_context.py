@@ -101,7 +101,11 @@ class ApplicationContext(ApplicationComponents):
         modules = [import_module(name) for name in self._module_names()]
         self.configuration.complete(*(section for module in modules for section in sections_declared_in(module)))
         self._container = wireup.create_sync_container(
-            injectables=[*modules, wireup.instance(self, as_type=ApplicationComponents)],
+            injectables=[
+                *modules,
+                wireup.instance(self, as_type=ApplicationComponents),
+                wireup.instance(self, as_type=ApplicationContext),
+            ],
             config={CONFIGURATION_KEY: self.configuration},
         )
         for component_type, replacement in (overrides or {}).items():

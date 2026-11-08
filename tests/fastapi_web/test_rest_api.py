@@ -211,7 +211,9 @@ def test_two_authentications_in_the_component_scan_stop_the_start() -> None:
 
 
 def server(*, allowed_hosts: tuple[str, ...], debug: bool = False) -> ServerProperties:
-    return ServerProperties(debug=debug, allowed_hosts=allowed_hosts, log_level="INFO")
+    return ServerProperties(
+        host="127.0.0.1", port=8000, workers=1, debug=debug, allowed_hosts=allowed_hosts, log_level="INFO"
+    )
 
 
 def test_the_server_answers_only_its_allowed_hosts(container: wireup.SyncContainer) -> None:

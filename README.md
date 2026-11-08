@@ -21,7 +21,7 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
 | `@configuration_properties`, `Section`, `application-<profile>.toml` | `@ConfigurationProperties`, profiles | `snakeboot[configuration]` |
 | `ServerProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
-| `snakeboot.boot`: `run`, `asgi_application` | `SpringApplication.run`, auto-configuration, the embedded server | `snakeboot[web]` |
+| `snakeboot.boot`: `run`, `python -m myapp serve` | `SpringApplication.run`, auto-configuration, the embedded server | `snakeboot[web]` |
 | `@rest_controller`, `@route.get(status=...)`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@ResponseStatus`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[web]` |
 | `Principal`, `BearerAuthentication` | `@AuthenticationPrincipal`, a `SecurityFilterChain` bean | `snakeboot[web]` |
 | `InvalidRequestError`, `RequestProblem` | `MethodArgumentNotValidException` | `snakeboot[web]` |
@@ -51,9 +51,10 @@ uv add "snakeboot[configuration,web,data,rabbitmq,oauth2]"   # with RabbitMQ and
 **The application.** A class marked with `@application_root`, like `@SpringBootApplication`, is the application.
 Its component scan decides what goes into the container: the package of the class, or the packages `base_packages`
 names. The scan skips the server entry points (`wsgi.py`, `asgi.py`) and adds the components snakeboot provides
-itself (the event publisher, the lifecycle, the scheduler, `run_lifecycle`). `run` runs a command, like
-`SpringApplication.run`; `asgi_application` serves the application under uvicorn. Both come from `snakeboot.boot`, the
-one place that names the frameworks underneath.
+itself (the event publisher, the lifecycle, the scheduler, `serve`, `run_lifecycle`). `run`, from
+`snakeboot.boot`, runs a command, like `SpringApplication.run`: `python -m myapp serve` starts the web server where
+`[server]` says, as Spring Boot starts its embedded server, so the application holds no server entry point.
+`snakeboot.boot` is the one place that names the frameworks underneath.
 
 ```python
 # myapp/myapp_application.py
@@ -62,8 +63,8 @@ one place that names the frameworks underneath.
 class MyApplication: ...
 
 
-# myapp/__main__.py                               # myapp/asgi.py: uvicorn myapp.asgi:application
-from snakeboot.boot import run                     application = asgi_application(MyApplication)
+# myapp/__main__.py: python -m myapp serve, python -m myapp migrate, python -m myapp help
+from snakeboot.boot import run
 
 run(MyApplication)
 ```
@@ -88,6 +89,9 @@ class ChatbotProperties(Section):
 
 ```toml
 [server]
+host = "0.0.0.0"            # where `serve` listens: every interface, as in a container
+port = 8000
+workers = 2                 # processes, each with its own listeners and scheduled methods
 debug = false
 allowed_hosts = ["*"]       # or "games.example.com", "*.example.com"
 log_level = "INFO"
@@ -258,8 +262,8 @@ def register(self, workshop_id: str, participant: Principal) -> RegistrationDTO:
 `audience`), like Spring Boot's resource server. It fetches the issuer's public keys and caches them, and accepts a
 token only when the signature, the issuer, the audience and the expiry are right; its `sub` is the principal.
 
-**What runs beside the requests.** uvicorn says when the server starts and stops with ASGI's `lifespan`, which
-`asgi_application` answers: every `Lifecycle` component starts, like a `SmartLifecycle` bean, and
+**What runs beside the requests.** When `serve` starts the server, and in each of its processes, every `Lifecycle`
+component starts, like a `SmartLifecycle` bean, and
 `ApplicationReadyEvent` goes to the event listeners. Commands and tests start nothing. `python -m myapp run_lifecycle`
 runs the same lifecycle without a web server, until SIGTERM: a process that only listens and schedules, like Spring
 Boot without the web starter.
@@ -268,7 +272,7 @@ Boot without the web starter.
 `CommandLineRunner` bean: a component whose constructor receives use cases and ports, with arguments declared as with
 argparse in a classmethod, because they are parsed before the command is built: `--help` answers at once, even when
 the command depends on a server that is down. `python -m myapp self_play --games 20` runs it; `python -m myapp help`
-lists the application's commands and snakeboot's own (`run_lifecycle`, `migrate`, `make_migration`). A
+lists the application's commands and snakeboot's own (`serve`, `run_lifecycle`, `migrate`, `make_migration`). A
 `CommandLineError` stops the command with its message and exit status 1; two commands of one name stop the start.
 
 ```python
