@@ -1,6 +1,6 @@
 [project]
 name = "snakeboot"
-version = "0.10.1"
+version = "0.10.2"
 description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan, typed configuration with profiles, singleton REST controllers on FastAPI and Spring Data repositories on SQLAlchemy, wired by wireup."
 readme = "README.md"
 license = "MIT"

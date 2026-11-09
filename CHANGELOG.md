@@ -3,6 +3,14 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.10,<0.11`.
 
+## 0.10.2
+
+- `snakeboot.sqlalchemy_data.testing`: the database in memory of a test lends its one connection to one thread at a
+  time from inside SQLAlchemy's pool (`OneThreadAtATimePool`). 0.10.0 waited for it in the pool's checkout event,
+  after the pool had already handed the waiting thread the record of the connection another thread held; that thread
+  then never gave the connection back, and a test whose scheduler or listeners used the database next to it failed
+  after ten seconds with "Another thread held the database in memory".
+
 ## 0.10.1
 
 - `snakeboot.sqlalchemy_data`: a transaction's session holds every entity it read until the transaction ends, like
