@@ -9,8 +9,8 @@ class InvalidRestControllerError(TypeError):
 
 
 class NoAuthenticatedPrincipalError(TypeError):
-    """Raised when an endpoint asks who called, but the authentication answered with something other than an id.
+    """Raised when an endpoint asks who called, but the authentication answered with neither a principal nor an id.
 
     It is a programming error, not a client error: the installed `BearerAuthentication` returned something else
-    than a string.
+    than a `Principal` or a string.
     """

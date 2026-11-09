@@ -163,7 +163,7 @@ def test_swagger_ui_and_the_openapi_document_live_below_api(client: TestClient) 
 def test_health_answers_with_the_name_of_the_application_package(client: TestClient) -> None:
     answer = client.get("/health")
 
-    assert (answer.status_code, answer.json()) == (200, {"status": "ok", "service": "rest"})
+    assert (answer.status_code, answer.json()) == (200, {"status": "UP", "service": "rest", "components": {}})
 
 
 def test_health_answers_without_a_token(secured: TestClient) -> None:

@@ -12,6 +12,8 @@ from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.lifecycle import Lifecycle
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.scheduling.scheduled import SCHEDULED_MAPPING_ATTRIBUTE, InvalidScheduledTaskError, ScheduledMapping
+from snakeboot.scheduling.scheduler_lock import SCHEDULER_LOCK_ATTRIBUTE, SchedulerLockMapping, SchedulerLockProvider
+from snakeboot.tracing import TraceContext
 
 logger = logging.getLogger(__name__)
 
@@ -43,15 +45,24 @@ class TaskScheduler(Lifecycle, component=False):
     `start` finds the methods and their components; a method that cannot run as declared stops the start-up, even
     when `auto_startup` is off, so a broken schedule shows in every process. Without methods, or with `auto_startup`
     off, no thread starts. A method that raises is logged and keeps its schedule. `stop` lets the method in hand
-    finish (for at most `SHUTDOWN_SECONDS`) and starts no other.
+    finish (for at most `SHUTDOWN_SECONDS`) and starts no other. Every run is a trace of its own; a method with a
+    `@scheduler_lock` runs only when the `lock_provider` hands this process the lock.
 
     `snakeboot.scheduling.task_scheduler_injectable` registers it with wireup; tests build it with stand-ins.
     """
 
-    def __init__(self, components: ApplicationComponents, task_decorator: TaskDecorator, *, auto_startup: bool) -> None:
+    def __init__(
+        self,
+        components: ApplicationComponents,
+        task_decorator: TaskDecorator,
+        *,
+        auto_startup: bool,
+        lock_provider: SchedulerLockProvider | None = None,
+    ) -> None:
         self._components = components
         self._task_decorator = task_decorator
         self._auto_startup = auto_startup
+        self._lock_provider = lock_provider
         self._stopping = threading.Event()
         self._thread: threading.Thread | None = None
 
@@ -91,7 +102,29 @@ class TaskScheduler(Lifecycle, component=False):
                 f"{marked.name} is @scheduled, but {marked.owner.__qualname__} is no component: add @injectable."
             ) from error
         run: Callable[[], None] = getattr(component, marked.method.__name__)
+        lock: SchedulerLockMapping | None = getattr(marked.method, SCHEDULER_LOCK_ATTRIBUTE, None)
+        if lock is not None:
+            run = self._locked(marked.name, run, lock)
         return ScheduledTask(marked.name, self._task_decorator.decorate(run), marked.mapping)
+
+    def _locked(self, name: str, run: Callable[[], None], lock: SchedulerLockMapping) -> Callable[[], None]:
+        provider = self._lock_provider
+        if provider is None:
+            raise InvalidScheduledTaskError(
+                f"{name} has a @scheduler_lock, whose lock lives in the database: the application has no [database]."
+            )
+
+        def run_when_locked() -> None:
+            held = provider.try_lock(lock)
+            if held is None:
+                logger.debug("The lock %s is held elsewhere: this turn of %s is skipped", lock.name, name)
+                return
+            try:
+                run()
+            finally:
+                held.release()
+
+        return run_when_locked
 
     def _run(self, tasks: Sequence[ScheduledTask]) -> None:
         now = time.monotonic()
@@ -106,7 +139,8 @@ class TaskScheduler(Lifecycle, component=False):
 
 
 def _run_logging_failures(task: ScheduledTask) -> None:
-    try:
-        task.run()
-    except Exception:
-        logger.exception("The scheduled method %s failed; it runs again at its next turn", task.name)
+    with TraceContext.started():
+        try:
+            task.run()
+        except Exception:
+            logger.exception("The scheduled method %s failed; it runs again at its next turn", task.name)

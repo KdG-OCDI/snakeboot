@@ -13,6 +13,7 @@ from cryptography.hazmat.primitives.asymmetric.rsa import RSAPrivateKey
 from snakeboot.configuration import OAuth2Properties
 from snakeboot.oauth2 import JwtBearerAuthentication
 from snakeboot.rest import BearerAuthentication
+from snakeboot.security import Principal
 from tests.oauth2.secured import player_tokens
 from tests.oauth2.secured.player_tokens import PlayerTokens
 
@@ -49,7 +50,26 @@ def authentication(monkeypatch: pytest.MonkeyPatch) -> JwtBearerAuthentication:
 
 
 def test_a_valid_token_gives_its_subject(authentication: JwtBearerAuthentication) -> None:
-    assert authentication.authenticate(token()) == "ann"
+    assert authentication.authenticate(token()) == Principal("ann")
+
+
+def test_the_principal_has_the_realm_roles_and_the_client_roles_of_the_audience(
+    authentication: JwtBearerAuthentication,
+) -> None:
+    keycloak = token(
+        realm_access={"roles": ["player", "offline_access"]},
+        resource_access={AUDIENCE: {"roles": ["organizer"]}, "other-client": {"roles": ["admin"]}},
+    )
+
+    principal = authentication.authenticate(keycloak)
+
+    assert principal == Principal("ann", roles=frozenset({"player", "offline_access", "organizer"}))
+
+
+def test_the_principal_has_the_roles_of_a_plain_roles_claim(authentication: JwtBearerAuthentication) -> None:
+    principal = authentication.authenticate(token(roles=["reader", 42]))
+
+    assert principal == Principal("ann", roles=frozenset({"reader"}))
 
 
 def test_a_subclass_is_a_component_and_the_base_is_not() -> None:
@@ -105,4 +125,4 @@ def test_a_module_that_extends_it_gives_the_container_one_bearer_authentication(
     authentication = container.get(BearerAuthentication)
 
     assert isinstance(authentication, PlayerTokens)
-    assert authentication.authenticate(token()) == "ann"
+    assert authentication.authenticate(token()) == Principal("ann")

@@ -47,7 +47,8 @@ class SqlAlchemyRepositoryOperations(RepositoryOperations):
     """Runs the repositories of `snakeboot.data` on SQLAlchemy, in the session of the running transaction.
 
     Every call joins the running transaction, or runs in one of its own, as Spring Data's repositories are
-    transactional. `save` is SQLAlchemy's `merge`: an UPDATE for an identifier the table has, an INSERT otherwise.
+    transactional. `save` is SQLAlchemy's `merge`: an UPDATE for an identifier the table has, an INSERT otherwise;
+    with a `Version()` field, the UPDATE holds only while the row has the version the entity was read with.
     """
 
     def __init__(self, database: Database, mapping: EntityMapping) -> None:
@@ -66,12 +67,16 @@ class SqlAlchemyRepositoryOperations(RepositoryOperations):
     def delete(self, entity: Any) -> None:
         with self._database.session() as session:
             session.delete(session.merge(entity))
+            session.flush()
 
     @override
     def find(self, call: QueryCall) -> list[Any]:
         statement: Select[Any] = self._ordered(call, select(call.entity.entity_type).where(self._where(call)))
         if call.lock is not None:
-            statement = statement.with_for_update(read=call.lock is LockMode.PESSIMISTIC_READ)
+            statement = statement.with_for_update(
+                read=call.lock is LockMode.PESSIMISTIC_READ,
+                skip_locked=call.lock is LockMode.PESSIMISTIC_WRITE_SKIP_LOCKED,
+            )
         with self._database.session() as session:
             return list(session.scalars(statement))
 

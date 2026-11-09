@@ -9,6 +9,7 @@ import pytest
 from pydantic import BaseModel
 
 from snakeboot.rabbitmq import AmqpPublishError, RabbitTemplate
+from snakeboot.tracing import TraceContext
 from tests.rabbitmq.fake_broker import FakeBroker
 from tests.rabbitmq.stand_ins import connection_factory_of
 
@@ -43,6 +44,16 @@ def test_sends_the_payload_as_a_persistent_json_message(template: RabbitTemplate
     assert message.properties.content_type == "application/json"
     assert message.properties.delivery_mode == pika.DeliveryMode.Persistent.value
     assert message.properties.message_id == "s1.finished"
+
+
+def test_the_message_carries_the_trace_of_the_work_in_hand(template: RabbitTemplate, broker: FakeBroker) -> None:
+    template.convert_and_send("games", "game.tictactoe.finished", FINISHED)
+    with TraceContext.started() as span:
+        template.convert_and_send("games", "game.tictactoe.finished", FINISHED)
+
+    outside, inside = broker.published
+    assert outside.properties.headers is None
+    assert inside.properties.headers == {"traceparent": span.traceparent}
 
 
 def test_waits_for_the_broker_to_confirm_and_declares_the_exchange_once(

@@ -40,6 +40,28 @@ class LastModifiedDate:
 
 
 @dataclass(frozen=True, slots=True)
+class CreatedBy:
+    """Marks a `str | None` that `save` fills, when the entity is first saved, with the name of the signed-in
+    principal, like Spring Data's `@CreatedBy`; without one it stays empty."""
+
+
+@dataclass(frozen=True, slots=True)
+class LastModifiedBy:
+    """Marks a `str | None` that every `save` fills with the name of the signed-in principal, or empties without
+    one, like Spring Data's `@LastModifiedBy`."""
+
+
+@dataclass(frozen=True, slots=True)
+class Version:
+    """Marks the `int` that guards an entity against lost updates, like JPA's `@Version`.
+
+    Every update raises it by one, on the condition that the row still holds the number the entity was read with; when
+    another transaction changed the row meanwhile, the save raises `OptimisticLockingFailureError` (answer it with 409).
+    A new entity gets 1. Declare it `Annotated[int | None, Version()] = None`.
+    """
+
+
+@dataclass(frozen=True, slots=True)
 class Json:
     """Marks a field stored as JSON whatever its type, like JPA's `@JdbcTypeCode(SqlTypes.JSON)`.
 
@@ -69,9 +91,9 @@ class Index:
         object.__setattr__(self, "columns", columns)
 
 
-type Marker = Id | Column | CreatedDate | LastModifiedDate | Json | Vector
+type Marker = Id | Column | CreatedDate | LastModifiedDate | CreatedBy | LastModifiedBy | Version | Json | Vector
 
-_MARKERS: Final = (Id, Column, CreatedDate, LastModifiedDate, Json, Vector)
+_MARKERS: Final = (Id, Column, CreatedDate, LastModifiedDate, CreatedBy, LastModifiedBy, Version, Json, Vector)
 
 
 @dataclass(frozen=True, slots=True)
@@ -102,6 +124,11 @@ class EntityDescription:
         """The property marked with `Id`."""
         return next(prop for prop in self.properties if prop.marker(Id) is not None)
 
+    @property
+    def version(self) -> Property | None:
+        """The property marked with `Version`, or None for an entity without optimistic locking."""
+        return next((prop for prop in self.properties if prop.marker(Version) is not None), None)
+
     def property_named(self, name: str) -> Property | None:
         """Returns the property `name`, or None."""
         return next((prop for prop in self.properties if prop.name == name), None)
@@ -118,6 +145,8 @@ def entity[C: type](table: str, *, indexes: tuple[Index, ...] = ()) -> Callable[
             board: list[str]                                   # JSON
             join_deadline: datetime | None                      # an empty column
             updated_at: Annotated[datetime | None, LastModifiedDate()] = None
+            updated_by: Annotated[str | None, LastModifiedBy()] = None   # who, from the SecurityContext
+            version: Annotated[int | None, Version()] = None             # optimistic locking
 
     A field's type is its column's: `str`, `int`, `float`, `bool`, `Decimal`, `UUID`, `datetime` (with its time zone),
     `date`, and `list`, `dict` or `Any` as JSON (`Json()` makes any field JSON); `X | None` may be empty. The class
@@ -153,6 +182,8 @@ def _describe(entity_type: type, table: str, indexes: tuple[Index, ...]) -> Enti
     properties = tuple(_property(field.name, hints[field.name]) for field in dataclasses.fields(entity_type))
     description = EntityDescription(entity_type, table, properties, indexes)
     _refuse_wrong_identifiers(description)
+    _refuse_wrong_versions(description)
+    _refuse_wrong_auditors(description)
     _refuse_unknown_index_columns(description)
     return description
 
@@ -185,6 +216,25 @@ def _refuse_wrong_identifiers(description: EntityDescription) -> None:
             f"{description.entity_type.__name__} marks {len(identifiers)} fields with Id(): an entity has one "
             "identifier, `Annotated[UUID, Id()]` say."
         )
+
+
+def _refuse_wrong_versions(description: EntityDescription) -> None:
+    versions = [prop for prop in description.properties if prop.marker(Version) is not None]
+    name = description.entity_type.__name__
+    if len(versions) > 1:
+        raise InvalidEntityError(f"{name} marks {len(versions)} fields with Version(): an entity has one version.")
+    if versions and versions[0].python_type is not int:
+        raise InvalidEntityError(f"{name}.{versions[0].name} is a Version(), so it is an `int | None`.")
+
+
+def _refuse_wrong_auditors(description: EntityDescription) -> None:
+    for prop in description.properties:
+        auditor = prop.marker(CreatedBy) or prop.marker(LastModifiedBy)
+        if auditor is not None and (prop.python_type is not str or not prop.nullable):
+            raise InvalidEntityError(
+                f"{description.entity_type.__name__}.{prop.name} is a {type(auditor).__name__}(), so it is a "
+                "`str | None`: work that nobody signed in to leaves it empty."
+            )
 
 
 def _refuse_unknown_index_columns(description: EntityDescription) -> None:

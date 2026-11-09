@@ -10,7 +10,8 @@ PROJECT = "tests.component_scan.sample_project"
 PUBLISHER = "snakeboot.events.application_event_publisher_injectable"
 LIFECYCLE = "snakeboot.lifecycle.application_lifecycle_injectable"
 SCHEDULER = "snakeboot.scheduling.task_scheduler_injectable"
-AUTO_CONFIGURED = (PUBLISHER, LIFECYCLE, SCHEDULER)
+ACTUATOR = "snakeboot.actuator.actuator_injectable"
+AUTO_CONFIGURED = (ACTUATOR, PUBLISHER, LIFECYCLE, SCHEDULER)
 
 
 def own_modules(scan: ComponentScan) -> list[str]:

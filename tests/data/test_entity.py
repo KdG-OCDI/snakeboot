@@ -7,8 +7,18 @@ from uuid import UUID
 
 import pytest
 
-from snakeboot.data import Column, Id, Index, InvalidEntityError, LastModifiedDate, description_of, entity
-from tests.data.sample_entities import GameRecord, MoveRecord, PlayedMoveRecord
+from snakeboot.data import (
+    Column,
+    CreatedBy,
+    Id,
+    Index,
+    InvalidEntityError,
+    LastModifiedDate,
+    Version,
+    description_of,
+    entity,
+)
+from tests.data.sample_entities import GameRecord, MoveRecord, PlayedMoveRecord, WorkshopRecord
 
 
 def test_describes_the_table_and_each_field_in_order() -> None:
@@ -86,3 +96,45 @@ def test_an_index_on_a_field_the_entity_lacks_stops_the_start() -> None:
 def test_a_class_without_entity_is_none() -> None:
     with pytest.raises(InvalidEntityError, match="is not an @entity"):
         description_of(Column)
+
+
+def test_the_version_is_the_field_marked_with_version() -> None:
+    version = description_of(WorkshopRecord).version
+
+    assert version is not None
+    assert (version.name, version.python_type, version.nullable) == ("version", int, True)
+
+
+def test_an_entity_without_a_version_has_none() -> None:
+    assert description_of(MoveRecord).version is None
+
+
+def test_two_versions_stop_the_start() -> None:
+    with pytest.raises(InvalidEntityError, match="marks 2 fields with Version"):
+
+        @entity("twice_versioned")
+        @dataclass
+        class TwiceVersioned:
+            id: Annotated[int, Id()]
+            first: Annotated[int | None, Version()] = None
+            second: Annotated[int | None, Version()] = None
+
+
+def test_a_version_that_is_no_number_stops_the_start() -> None:
+    with pytest.raises(InvalidEntityError, match=r"Stamped\.stamp is a Version\(\), so it is an `int \| None`"):
+
+        @entity("stamped")
+        @dataclass
+        class Stamped:
+            id: Annotated[int, Id()]
+            stamp: Annotated[datetime | None, Version()] = None
+
+
+def test_an_auditor_that_may_not_be_empty_stops_the_start() -> None:
+    with pytest.raises(InvalidEntityError, match=r"Audited\.author is a CreatedBy\(\), so it is a `str \| None`"):
+
+        @entity("audited")
+        @dataclass
+        class Audited:
+            id: Annotated[int, Id()]
+            author: Annotated[str, CreatedBy()]

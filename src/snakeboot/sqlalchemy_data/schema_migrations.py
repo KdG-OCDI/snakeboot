@@ -67,9 +67,19 @@ class Migration:
         return hashlib.sha256(self.sql.encode()).hexdigest()
 
 
+LIBRARY_PACKAGE: Final = "snakeboot"
+"""The package whose own entities (the event publication registry's, the scheduler lock's) have no migrations of
+their own: `make_migration` writes their tables into the application's migrations, which `migrate` runs."""
+
+
 def migration_locations(entity_types: Iterable[type]) -> list[Path]:
-    """Returns the migrations directory next to the module of each entity, whether it exists yet or not."""
-    modules = {sys.modules[entity_type.__module__] for entity_type in entity_types}
+    """Returns the migrations directory next to the module of each of the application's entities, whether it exists
+    yet or not; snakeboot's own entities have none."""
+    modules = {
+        sys.modules[entity_type.__module__]
+        for entity_type in entity_types
+        if entity_type.__module__.partition(".")[0] != LIBRARY_PACKAGE
+    }
     return sorted({Path(module.__file__ or "").parent / LOCATION for module in modules})
 
 

@@ -17,3 +17,16 @@ class IncorrectResultSizeError(LookupError):
 class EmptyResultError(LookupError):
     """Raised when a method that returns exactly one entity (`-> GameRecord`, not `-> GameRecord | None`) finds none,
     like Spring's `EmptyResultDataAccessException`."""
+
+
+class OptimisticLockingFailureError(RuntimeError):
+    """Raised when a save or a delete finds that another transaction changed the entity's row since it was read.
+
+    The entity has a `Version()` field, and the row no longer holds the number the entity was read with, like Spring's
+    `OptimisticLockingFailureException`. Read the entity again and retry, or answer the caller with 409 Conflict.
+    """
+
+
+class DataIntegrityViolationError(RuntimeError):
+    """Raised when the database refuses a change that breaks one of its constraints: a duplicate unique value, a
+    missing foreign row, an empty column that may not be empty. Like Spring's `DataIntegrityViolationException`."""

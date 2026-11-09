@@ -26,6 +26,11 @@ class TransactionManagerRegistry:
         cls._installed = None
 
     @classmethod
+    def is_installed(cls) -> bool:
+        """Tells whether composition installed a manager, as an application with a database does."""
+        return cls._installed is not None
+
+    @classmethod
     def current(cls) -> TransactionManager:
         """Returns the installed manager or fails when composition forgot to install one."""
         if cls._installed is None:

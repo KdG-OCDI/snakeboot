@@ -13,7 +13,10 @@ from snakeboot.configuration import (
     CONFIGURATION_KEY,
     CacheProperties,
     Configuration,
+    CorsProperties,
     DatabaseProperties,
+    EventsProperties,
+    LoggingProperties,
     OAuth2Properties,
     RabbitProperties,
     SchedulingProperties,
@@ -37,6 +40,9 @@ OPTIONAL_SECTIONS: Final = (
     OAuth2Properties,
     RabbitProperties,
     SchedulingProperties,
+    CorsProperties,
+    LoggingProperties,
+    EventsProperties,
 )
 """The sections of snakeboot an application may leave out; `[server]` is the one it always has."""
 
@@ -65,10 +71,12 @@ class ApplicationContext(ApplicationComponents):
     @classmethod
     def of(cls, application: type, conditional: ConditionalModules) -> Self:
         """Reads the configuration of `application` and its modules, and configures logging; builds nothing yet."""
-        configuration = begin_configuration(
-            ServerProperties, optional=OPTIONAL_SECTIONS, package=application_package(application)
+        package = application_package(application)
+        configuration = begin_configuration(ServerProperties, optional=OPTIONAL_SECTIONS, package=package)
+        logging_properties = (
+            configuration.get(LoggingProperties) if LoggingProperties in configuration.sections else None
         )
-        configure_logging(configuration.get(ServerProperties))
+        configure_logging(configuration.get(ServerProperties), logging_properties, service=package.rpartition(".")[2])
         present = tuple(
             module
             for section, modules in conditional.items()

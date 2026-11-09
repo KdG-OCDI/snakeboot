@@ -33,3 +33,13 @@ class StreamingApplication:
 @application_root(base_packages=("tests.rest.unadvised",))
 class UnadvisedApplication:
     pass
+
+
+@application_root(base_packages=("tests.rest.role_secured",))
+class RoleSecuredApplication:
+    pass
+
+
+@application_root(base_packages=("tests.rest.traced",))
+class TracedApplication:
+    pass

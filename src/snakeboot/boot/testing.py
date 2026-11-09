@@ -3,8 +3,9 @@ from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self
 
 from snakeboot.application import ApplicationContext
-from snakeboot.boot.entry_points import CONDITIONAL_MODULES
+from snakeboot.boot.entry_points import CONDITIONAL_MODULES, web_api
 from snakeboot.configuration import Configuration, DatabaseProperties, ServerProperties
+from snakeboot.events import SyncTaskExecutor, TaskExecutor
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
 
@@ -27,10 +28,11 @@ class TestApplication:
             assert client.get("/api/tictactoe/games/42").status_code == 404
             assert app.get(GameRecords).count() == 0               # any component of the container
 
-    The application starts as it does for real, from its application.toml and the active profile, with two
-    differences: `overrides` replace components with doubles, and with `[database]` the database is a fresh one in
-    memory whose tables come from the entities, as Spring Boot's tests create the schema from JPA's metamodel. A test
-    of the SQL migrations themselves runs `migrate` against a real database instead.
+    The application starts as it does for real, from its application.toml and the active profile, with three
+    differences: `overrides` replace components with doubles; with `[database]` the database is a fresh one in
+    memory whose tables come from the entities, as Spring Boot's tests create the schema from JPA's metamodel; and the
+    `@application_module_listener` methods run on the caller's thread, so what they did is there when the call that
+    published returns. A test of the SQL migrations themselves runs `migrate` against a real database instead.
     """
 
     __test__ = False  # pytest: a class named Test... that is no test class
@@ -42,7 +44,7 @@ class TestApplication:
     def start(cls, application: type, overrides: Mapping[Any, object] | None = None) -> Self:
         """Starts `application` with `overrides` and, when it has `[database]`, a database in memory."""
         context = ApplicationContext.of(application, CONDITIONAL_MODULES)
-        replacements = dict(overrides or {})
+        replacements: dict[Any, object] = {TaskExecutor: SyncTaskExecutor(), **(overrides or {})}
         with_database = DatabaseProperties in context.configuration.sections
         if with_database:
             replacements.update(_in_memory_database(replacements))
@@ -68,10 +70,8 @@ class TestApplication:
         """
         from starlette.testclient import TestClient  # noqa: PLC0415  # reason: only a test of the API needs it
 
-        from snakeboot.fastapi_web import rest_api  # noqa: PLC0415  # reason: only a test of the API needs it
-
         server = self._context.configuration.get(ServerProperties)
-        api = rest_api(self._context.application, self._context.get, server=server)
+        api = web_api(self._context)
         context = self._context
 
         async def lifecycle() -> ApplicationLifecycle:

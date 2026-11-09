@@ -9,10 +9,12 @@ from collections.abc import Iterator
 
 from wireup import injectable
 
+from snakeboot.actuator import HealthIndicator
 from snakeboot.configuration import DatabaseProperties
 from snakeboot.data import ENTITY_ATTRIBUTE, RepositoryOperations
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.sqlalchemy_data.database import Database
+from snakeboot.sqlalchemy_data.database_health_indicator import DatabaseHealthIndicator
 from snakeboot.sqlalchemy_data.entity_mapping import EntityMapping
 from snakeboot.sqlalchemy_data.migration_generator import MigrationGenerator
 from snakeboot.sqlalchemy_data.schema_migrations import SchemaMigrations, migration_locations, migrations_in
@@ -27,6 +29,12 @@ def database(properties: DatabaseProperties) -> Iterator[Database]:
     opened = Database.of(properties)
     yield opened
     opened.close()
+
+
+@injectable(as_type=HealthIndicator, qualifier="snakeboot.sqlalchemy_data.DatabaseHealthIndicator")
+def database_health_indicator(database: Database) -> HealthIndicator:
+    """Provides the check of the database that `/health` runs."""
+    return DatabaseHealthIndicator(database)
 
 
 @injectable

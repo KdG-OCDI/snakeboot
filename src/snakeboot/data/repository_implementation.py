@@ -8,9 +8,10 @@ from typing import Any, ClassVar, Final, Union, get_args, get_origin
 
 from snakeboot.data.data_errors import EmptyResultError, IncorrectResultSizeError, InvalidRepositoryError
 from snakeboot.data.derived_query import Action, Condition, DerivedQuery, Operator, derive_query
-from snakeboot.data.entity import CreatedDate, EntityDescription, LastModifiedDate
+from snakeboot.data.entity import CreatedBy, CreatedDate, EntityDescription, LastModifiedBy, LastModifiedDate
 from snakeboot.data.query_methods import LOCK_ATTRIBUTE, QUERY_ATTRIBUTE
 from snakeboot.data.repository_operations import NativeQuery, PageRequest, QueryCall, RepositoryOperations
+from snakeboot.security import SecurityContext
 
 _EVERYTHING: Final = DerivedQuery(Action.FIND, alternatives=(), ordering=(), limit=None)
 
@@ -35,7 +36,7 @@ class RepositoryImplementation:
         self._operations = operations
 
     def save(self, entity: Any) -> Any:
-        """Fills the audit dates, then inserts or updates `entity`."""
+        """Fills the audit dates and auditors, then inserts or updates `entity`."""
         return self._operations.save(_audited(self._entity, entity))
 
     def save_all(self, entities: Iterable[Any]) -> list[Any]:
@@ -194,12 +195,15 @@ def _one_of(results: list[Any], cardinality: Cardinality) -> Any:
 
 
 def _audited(entity: EntityDescription, value: Any) -> Any:
-    now = datetime.now(UTC)
+    # Like Spring Data's AuditingHandler: the creation once, the last modification on every save.
+    now, principal = datetime.now(UTC), SecurityContext.current()
+    auditor = principal.name if principal is not None else None
     for prop in entity.properties:
-        modified = prop.marker(LastModifiedDate) is not None
-        created = prop.marker(CreatedDate) is not None and getattr(value, prop.name) is None
-        if modified or created:
+        empty = getattr(value, prop.name) is None
+        if prop.marker(LastModifiedDate) is not None or (prop.marker(CreatedDate) is not None and empty):
             setattr(value, prop.name, now)
+        elif prop.marker(LastModifiedBy) is not None or (prop.marker(CreatedBy) is not None and empty):
+            setattr(value, prop.name, auditor)
     return value
 
 

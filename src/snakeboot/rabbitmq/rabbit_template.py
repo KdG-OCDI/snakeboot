@@ -9,6 +9,7 @@ from pika.exceptions import AMQPError
 
 from snakeboot.rabbitmq.message_conversion import body_of
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
+from snakeboot.tracing import TRACEPARENT, TraceContext
 
 
 class AmqpPublishError(RuntimeError):
@@ -20,10 +21,11 @@ class RabbitTemplate:
 
         self._rabbit.convert_and_send("games", "game.tictactoe.finished", event, message_id=f"{game_id}.finished")
 
-    The payload becomes a persistent JSON message. `convert_and_send` returns once the broker confirmed it (publisher
-    confirms); a connection that went stale is replaced and the message sent once more, then `AmqpPublishError`
-    says it did not arrive. Each thread uses a connection of its own, as pika requires. The topic exchange is
-    declared (durable) before the first message to it, so sending works before anyone listens.
+    The payload becomes a persistent JSON message, with the `traceparent` of the work in hand, so the listener
+    continues its trace. `convert_and_send` returns once the broker confirmed it (publisher confirms); a connection
+    that went stale is replaced and the message sent once more, then `AmqpPublishError` says it did not arrive. Each
+    thread uses a connection of its own, as pika requires. The topic exchange is declared (durable) before the first
+    message to it, so sending works before anyone listens.
     """
 
     def __init__(self, connection_factory: RabbitConnectionFactory) -> None:
@@ -35,11 +37,13 @@ class RabbitTemplate:
     ) -> None:
         """Sends `payload` as JSON to `exchange` with `routing_key`; raises AmqpPublishError when it did not arrive."""
         body = body_of(payload)
+        span = TraceContext.current()
         properties = pika.BasicProperties(
             content_type="application/json",
             delivery_mode=pika.DeliveryMode.Persistent,
             message_id=message_id,
             timestamp=int(time.time()),
+            headers={TRACEPARENT: span.traceparent} if span is not None else None,
         )
         message = _OutgoingMessage(exchange, routing_key, body, properties)
         try:

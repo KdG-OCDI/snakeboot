@@ -18,13 +18,15 @@ of Python's web servers and migration tools, so the scan needs to import nothing
 """
 
 SNAKEBOOT_AUTO_CONFIGURATION: Final = (
+    "snakeboot.actuator.actuator_injectable",
     "snakeboot.events.application_event_publisher_injectable",
     "snakeboot.lifecycle.application_lifecycle_injectable",
     "snakeboot.scheduling.task_scheduler_injectable",
 )
 """Modules of snakeboot itself that register components, like Spring Boot's `@EnableAutoConfiguration`.
 
-Spring Boot always provides an `ApplicationEventPublisher`, a lifecycle and a scheduler; so does snakeboot,
+Spring Boot always provides an `ApplicationEventPublisher`, a lifecycle, a scheduler and, with the actuator, a health
+and a meter registry; so does snakeboot,
 through these modules. The scan adds them to every application without the application naming them. The names
 are strings: the scan still imports nothing and depends on no other part of snakeboot. What the framework
 underneath adds, its binding adds itself.

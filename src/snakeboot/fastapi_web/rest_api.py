@@ -1,16 +1,20 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Mapping
 from typing import Any, Final
 
 from fastapi import APIRouter, FastAPI, Request
 from fastapi.exceptions import RequestValidationError
+from starlette.middleware.cors import CORSMiddleware
 from starlette.middleware.trustedhost import TrustedHostMiddleware
 from starlette.responses import Response
 
+from snakeboot.actuator import Actuator
 from snakeboot.component_scan import ComponentScan, application_package
-from snakeboot.configuration import ServerProperties
+from snakeboot.configuration import CorsProperties, ServerProperties
+from snakeboot.fastapi_web.actuator_endpoints import add_actuator
 from snakeboot.fastapi_web.bearer_token import BearerToken, ComponentResolver
 from snakeboot.fastapi_web.event_stream import EventStreamResponse
 from snakeboot.fastapi_web.fastapi_endpoint_factory import ErrorAnswer, FastApiEndpointFactory
+from snakeboot.fastapi_web.observation import RequestMetricsMiddleware, TracingMiddleware
 from snakeboot.openapi import openapi_definition_of
 from snakeboot.rest import (
     UNDECLARED,
@@ -25,17 +29,25 @@ from snakeboot.rest import (
 API_PREFIX: Final = "/api"
 """Where the REST API lives; its OpenAPI document is /api/openapi.json and Swagger UI /api/docs."""
 
-HEALTH_PATH: Final = "/health"
-"""The liveness probe, outside the API: it answers without authentication."""
 
-
-def rest_api(application: type, resolve: ComponentResolver, *, server: ServerProperties | None = None) -> FastAPI:
+def rest_api(
+    application: type,
+    resolve: ComponentResolver,
+    *,
+    server: ServerProperties | None = None,
+    cors: CorsProperties | None = None,
+    actuator: Actuator | None = None,
+) -> FastAPI:
     """Returns the REST API of `application` on FastAPI: every controller and advice of its component scan.
 
     The title, version and description come from `@openapi_definition` on the application class. When the component
     scan holds a `BearerAuthentication`, every endpoint that is not public asks it for the bearer token. `server`
     turns on FastAPI's debug answers and accepts only its `allowed_hosts`; without it, as in a test, every host is
-    accepted. `resolve` finds a component for a call: the container's `get`, or a test's.
+    accepted. `cors` names the origins whose pages may call the API. `resolve` finds a component for a call: the
+    container's `get`, or a test's.
+
+    Beside the API it serves the health and the metrics of `actuator` (`/health`, `/health/liveness`,
+    `/health/readiness`, `/metrics`), runs every call in a span of its trace, and times it.
     """
     scanned = ControllerScan(ComponentScan.of(application)).find()
     api = FastAPI(
@@ -47,9 +59,21 @@ def rest_api(application: type, resolve: ComponentResolver, *, server: ServerPro
     )
     bearer_token = BearerToken(resolve) if scanned.authentication is not None else None
     add_routes(api, scanned, FastApiEndpointFactory(resolve, bearer_token))
-    api.add_api_route(HEALTH_PATH, _health_of(application), methods=["GET"], include_in_schema=False)
+    observed = actuator or Actuator()
+    add_actuator(api, application_package(application).rpartition(".")[2], observed)
+    # Starlette runs the middleware added last first: the timing sees every answer, the span every log line.
     if server is not None:
         api.add_middleware(TrustedHostMiddleware, allowed_hosts=list(server.allowed_hosts))
+    if cors is not None:
+        api.add_middleware(
+            CORSMiddleware,
+            allow_origins=list(cors.allowed_origins),
+            allow_methods=list(cors.allowed_methods),
+            allow_headers=list(cors.allowed_headers),
+            allow_credentials=cors.allow_credentials,
+        )
+    api.add_middleware(TracingMiddleware)
+    api.add_middleware(RequestMetricsMiddleware, meters=observed.meters)
     return api
 
 
@@ -115,12 +139,3 @@ def _description_of(application: type) -> dict[str, Any]:
     if definition is None:
         return {}
     return {"title": definition.title, "version": definition.version, "description": definition.description}
-
-
-def _health_of(application: type) -> Callable[[], dict[str, str]]:
-    _, _, service = application_package(application).rpartition(".")
-
-    def health() -> dict[str, str]:
-        return {"status": "ok", "service": service}
-
-    return health

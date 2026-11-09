@@ -8,6 +8,7 @@ from snakeboot.component_scan import ComponentScan
 from snakeboot.fastapi_web import BearerToken, FastApiEndpointFactory
 from snakeboot.fastapi_web.fastapi_endpoint_factory import PRINCIPAL_PARAMETER
 from snakeboot.rest import ControllerScan, DeclaredEndpoint, NoAuthenticatedPrincipalError
+from snakeboot.security import Principal
 from tests.rest.secured.who_am_i_rest_controller import WhoAmIRestController
 
 
@@ -39,8 +40,14 @@ def test_fills_the_principal_with_the_id_the_bearer_token_found() -> None:
     assert view(**{PRINCIPAL_PARAMETER: "alice"}) == {"name": "alice"}
 
 
+def test_fills_the_principal_with_the_principal_the_bearer_token_found() -> None:
+    view = factory(bearer=True).create(endpoint_named("who_am_i"))
+
+    assert view(**{PRINCIPAL_PARAMETER: Principal("bob", roles=frozenset({"admin"}))}) == {"name": "bob"}
+
+
 def test_without_an_id_there_is_no_principal() -> None:
     view = factory(bearer=True).create(endpoint_named("who_am_i"))
 
-    with pytest.raises(NoAuthenticatedPrincipalError, match="Expected the id of a signed-in principal"):
+    with pytest.raises(NoAuthenticatedPrincipalError, match="Expected a Principal or the id of a signed-in principal"):
         view()

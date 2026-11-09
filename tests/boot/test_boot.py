@@ -15,6 +15,6 @@ def test_asgi_application_serves_the_api_with_the_lifecycle_around_it() -> None:
     application = boot.asgi_application(SampleServiceApplication)
 
     with TestClient(application) as client:
-        assert client.get("/health").json() == {"status": "ok", "service": "sample_service"}
+        assert client.get("/health/liveness").json() == {"status": "UP"}
         assert client.get("/api/openapi.json").json()["info"]["title"] == "Sample service"
     assert isinstance(application, LifecycleAsgiApplication)

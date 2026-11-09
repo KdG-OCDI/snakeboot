@@ -7,11 +7,13 @@ neither pika nor a broker.
 
 from wireup import injectable
 
+from snakeboot.actuator import HealthIndicator
 from snakeboot.configuration.rabbitmq_properties import RabbitProperties
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.lifecycle import Lifecycle
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
+from snakeboot.rabbitmq.rabbit_health_indicator import RabbitHealthIndicator
 from snakeboot.rabbitmq.rabbit_listener_containers import RabbitListenerContainers
 from snakeboot.rabbitmq.rabbit_template import RabbitTemplate
 
@@ -26,6 +28,12 @@ def rabbit_connection_factory(properties: RabbitProperties) -> RabbitConnectionF
 def rabbit_template(connection_factory: RabbitConnectionFactory) -> RabbitTemplate:
     """Provides the one RabbitTemplate, which adapters inject to send messages."""
     return RabbitTemplate(connection_factory)
+
+
+@injectable(as_type=HealthIndicator, qualifier="snakeboot.rabbitmq.RabbitHealthIndicator")
+def rabbit_health_indicator(connection_factory: RabbitConnectionFactory) -> HealthIndicator:
+    """Provides the check of the broker that `/health` runs."""
+    return RabbitHealthIndicator(connection_factory)
 
 
 @injectable(as_type=Lifecycle, qualifier="snakeboot.rabbitmq.RabbitListenerContainers")

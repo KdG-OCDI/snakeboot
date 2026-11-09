@@ -1,0 +1,6 @@
+# The profile "timed": a registry that waits a minute after a failure and tries twice.
+[events]
+resubmit_every = 5
+in_flight = "PT2M"
+retry_after = 60
+max_attempts = 2

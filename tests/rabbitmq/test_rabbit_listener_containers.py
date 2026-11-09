@@ -70,6 +70,17 @@ def test_a_message_becomes_the_model_the_method_takes_and_is_acknowledged(
     assert broker.acked == [1]
 
 
+def test_a_message_continues_the_trace_of_its_sender(
+    containers: RabbitListenerContainers, broker: FakeBroker, listener: GameStartedListener
+) -> None:
+    containers.start()
+    sender = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
+    broker.deliver(QUEUE, b'{"session_id": "s1", "player_ids": []}', headers={"traceparent": sender})
+    settled(broker)
+
+    assert listener.traces == ["4bf92f3577b34da6a3ce929d0e0e4736"]
+
+
 def test_every_message_goes_through_the_task_decorator(
     containers: RabbitListenerContainers, broker: FakeBroker, decorator: CountingTaskDecorator
 ) -> None:

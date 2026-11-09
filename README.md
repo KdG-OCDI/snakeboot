@@ -19,14 +19,21 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `@transactional`, `after_commit` | `@Transactional`, `@TransactionalEventListener(AFTER_COMMIT)` | nothing |
 | `@application_root`, `ComponentScan` | `@SpringBootApplication`, `@ComponentScan` | nothing |
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
+| `@application_module_listener`, the event publication registry | Spring Modulith's `@ApplicationModuleListener`, `EventPublicationRegistry` (a transactional outbox) | wireup; `snakeboot[data]` for the registry |
 | `@configuration_properties`, `Section`, `application-<profile>.toml` | `@ConfigurationProperties`, profiles | `snakeboot[configuration]` |
 | `ServerProperties`, `DatabaseProperties`, `CacheProperties` | `server.*`, `spring.datasource.*`, `spring.data.redis.*` | `snakeboot[configuration]` |
 | `snakeboot.boot`: `run`, `python -m myapp serve` | `SpringApplication.run`, auto-configuration, the embedded server | `snakeboot[web]` |
 | `@rest_controller`, `@route.get(status=...)`, `@rest_controller_advice`, `@exception_handler` | `@RestController`, `@GetMapping`, `@ResponseStatus`, `@RestControllerAdvice`, `@ExceptionHandler` | `snakeboot[web]` |
 | `Principal`, `BearerAuthentication` | `@AuthenticationPrincipal`, a `SecurityFilterChain` bean | `snakeboot[web]` |
+| `@roles_allowed`, `Principal.roles`, `SecurityContext` | `@RolesAllowed`, `hasRole`, `SecurityContextHolder` | `snakeboot[web]` |
+| `[cors]`, `CorsProperties` | a `CorsRegistry` | `snakeboot[web]` |
+| `/health`, `/health/liveness`, `/health/readiness`, `HealthIndicator` | Actuator's health endpoint and probes, `HealthIndicator` | `snakeboot[web]` |
+| `/metrics`, `MeterRegistry` | Actuator's `/actuator/prometheus`, Micrometer | `snakeboot[web]` |
+| `TraceContext`, `traceparent`, `[logging] format = "ecs"` | Micrometer Tracing, structured logging | `snakeboot[configuration]` |
 | `InvalidRequestError`, `RequestProblem` | `MethodArgumentNotValidException` | `snakeboot[web]` |
 | `ServerSentEvents`, `ServerSentEvent` | `SseEmitter`, `ServerSentEvent` | `snakeboot[web]` |
 | `@entity`, `Id`, `Column`, `Index`, `CreatedDate`, `LastModifiedDate` | `@Entity`, `@Id`, `@Column`, `@Index`, `@CreatedDate`, `@LastModifiedDate` | `snakeboot[data]` |
+| `Version`, `CreatedBy`, `LastModifiedBy`, `OptimisticLockingFailureError` | `@Version`, `@CreatedBy`, `@LastModifiedBy`, `OptimisticLockingFailureException` | `snakeboot[data]` |
 | `CrudRepository`, derived queries, `@query`, `@lock`, `PageRequest` | Spring Data's `CrudRepository`, query methods, `@Query`, `@Lock`, `Pageable` | `snakeboot[data]` |
 | `migrate`, `make_migration`, `migrations/V1__*.sql` | Flyway | `snakeboot[data]` |
 | `Vector` | Spring AI's pgvector store | `snakeboot[data,vector]` |
@@ -35,6 +42,8 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `CommandLineRunner`, `CommandLineError` | `CommandLineRunner`, Spring Shell's `@Command` | wireup |
 | `Lifecycle`, `ApplicationReadyEvent`, `run_lifecycle` | `SmartLifecycle`, `ApplicationReadyEvent`, an application without the web starter | wireup |
 | `@scheduled`, `SchedulingProperties` | `@Scheduled` | `snakeboot[configuration]` |
+| `[events]`, `EventsProperties` | `spring.modulith.events.*` | `snakeboot[data]` |
+| `@scheduler_lock` | ShedLock's `@SchedulerLock` | `snakeboot[data]` |
 | `@rabbit_listener`, `RabbitTemplate`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
 | `TestApplication`, `RecordingTransactionManager`, `declared_classes` | `@SpringBootTest`, `@AutoConfigureTestDatabase`, `TestRestTemplate`, spring-test | `snakeboot[testing]` |
@@ -73,7 +82,7 @@ The application writes no settings and no URLs. `snakeboot.boot` reads `applicat
 class, builds wireup's container from the component scan, and adds what the tables ask for, like Spring Boot's
 conditional auto-configuration: SQLAlchemy and the transaction manager of `@transactional` with `[database]`, Redis
 with `[cache]`, RabbitMQ with `[rabbitmq]`. An application without a table imports none of those. The REST API lives
-under `/api/` (Swagger UI at `/api/docs`), next to `/health`.
+under `/api/` (Swagger UI at `/api/docs`), next to `/health` and `/metrics`.
 
 **Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys, the base class of every
 configuration model) is bound to one table of `application.toml`, like `@ConfigurationProperties`. A section is a
@@ -148,7 +157,15 @@ class GameRecords(CrudRepository[GameRecord, UUID], Protocol):
 ```
 
 `save` inserts or updates by identifier, like Spring Data's; every call joins the transaction of the running
-`@transactional`, or runs in one of its own. A last parameter of type `PageRequest` returns one page. On PostgreSQL a
+`@transactional`, or runs in one of its own. A `Version()` field guards against lost updates, like JPA's `@Version`:
+saving an entity another transaction changed since it was read raises `OptimisticLockingFailureError` (answer it with
+409), and a broken constraint is a `DataIntegrityViolationError`. `CreatedBy()` and `LastModifiedBy()` record who
+saved, from the `SecurityContext`, next to `CreatedDate()` and `LastModifiedDate()`.
+
+```python
+    updated_by: Annotated[str | None, LastModifiedBy()] = None   # the principal of the call, or None
+    version: Annotated[int | None, Version()] = None             # 1 for a new entity, one more per update
+``` A last parameter of type `PageRequest` returns one page. On PostgreSQL a
 `Vector(384)` field (extra `snakeboot[vector]`) holds an embedding for pgvector's similarity search in a `@query`.
 
 **Migrations.** The schema comes from SQL scripts, like Flyway's: `V1__create_tictactoe_game.sql`,
@@ -184,6 +201,33 @@ class ParticipantNotificationListener:
 
     @transactional_event_listener(WaitlistedParticipantPromoted)
     def notify_promoted(self, event: WaitlistedParticipantPromoted) -> None: ...
+```
+
+A `@transactional_event_listener` that fails, or a process that stops before it ran, loses the event. For what must
+arrive, an `@application_module_listener` is Spring Modulith's `@ApplicationModuleListener`: it receives the event after
+the commit, on a thread of its own, in a transaction of its own, so one module reacts to another without slowing it
+down or rolling it back. With `[database]` the publisher's transaction also writes the publication into
+`snakeboot_event_publication`, the transactional outbox, and the listener's transaction deletes it. A publication whose
+listener failed, or whose process stopped first, is delivered again (after 30 seconds, then longer, ten times at most),
+so the event arrives at least once and the listener must bear receiving it twice. What keeps failing waits in the
+table, with its last failure, for a person; the gauge `snakeboot_event_publications_incomplete` shows how many wait.
+The event is kept as JSON, so it is a dataclass or a Pydantic model; another type stops the start. `make_migration`
+writes the table into the application's migrations the first time. The optional table `[events]` sets the timing,
+like Spring Modulith's `spring.modulith.events.*`; without it, the values below hold.
+
+```toml
+[events]
+resubmit_every = 30      # seconds, or an ISO 8601 duration: how often the registry is asked what is due
+in_flight = "PT5M"       # longer than the slowest listener: a delivery not done by then was lost
+retry_after = 30         # after a failure, times the tries so far: 30 s, 1 min, 1.5 min, ...
+max_attempts = 10        # then the publication waits in the table for a person
+```
+
+```python
+@application_event_listener
+class InvoiceOnOrderPlaced:
+    @application_module_listener(OrderPlaced)
+    def create_invoice(self, event: OrderPlaced) -> None: ...
 ```
 
 **REST controllers.** Singleton classes with constructor injection. `ControllerScan` finds them in the modules of
@@ -240,7 +284,10 @@ def watch_game(self, game_id: str) -> ServerSentEvents:
 `SecurityFilterChain` bean: its constructor receives sections and ports by type. With one in the component scan, every
 endpoint needs `Authorization: Bearer <token>`, the OpenAPI document says so, and a parameter of type `Principal`
 receives whom the token belongs to, like `@AuthenticationPrincipal`. `/health` stays open; an endpoint opts out with
-`public=True`. A refused token answers 401 `{"detail": "Unauthorized"}`.
+`public=True`. A refused token answers 401 `{"detail": "Unauthorized"}`. `authenticate` returns the caller's id, or a
+`Principal` with the roles the token grants; `@roles_allowed` on an endpoint or a whole controller lets in only a caller
+with one of its roles, like `@RolesAllowed`, and answers anybody else 403 `{"detail": "Forbidden"}`. While an endpoint
+runs, its caller is signed in to the `SecurityContext`, like Spring's `SecurityContextHolder`.
 
 ```python
 class KeycloakTokens(BearerAuthentication):
@@ -255,12 +302,19 @@ class KeycloakTokens(BearerAuthentication):
 @route.post("/{workshop_id}/registrations", status=201)
 def register(self, workshop_id: str, participant: Principal) -> RegistrationDTO:
     return self._enrollment.register(workshop_id, participant_id=participant.name)
+
+
+@route.delete("/{workshop_id}", status=204)
+@roles_allowed("organizer")
+def cancel(self, workshop_id: str) -> None: ...
 ```
 
 **Tokens of an authorization server.** For the JWT access tokens of Keycloak or another OAuth2 server, extend
 `JwtBearerAuthentication` (extra `snakeboot[oauth2]`) and add the table `[oauth2]` (`issuer_uri`, `jwks_uri`,
 `audience`), like Spring Boot's resource server. It fetches the issuer's public keys and caches them, and accepts a
-token only when the signature, the issuer, the audience and the expiry are right; its `sub` is the principal.
+token only when the signature, the issuer, the audience and the expiry are right; its `sub` is the principal, and
+its roles are Keycloak's realm roles, its client roles for the audience, and a plain `roles` claim (override
+`roles_of` for another authorization server).
 
 **What runs beside the requests.** When `serve` starts the server, and in each of its processes, every `Lifecycle`
 component starts, like a `SmartLifecycle` bean, and
@@ -294,7 +348,16 @@ class SelfPlayCommand(CommandLineRunner, command="self_play"):
 
 **Scheduled methods.** `@scheduled` on a method of a component runs it periodically, like `@Scheduled`: with a fixed
 rate or a fixed delay, on one thread. A method that raises is logged and runs again at its next turn.
-`[scheduling] auto_startup = false` keeps a process from running them.
+`[scheduling] auto_startup = false` keeps a process from running them. Every replica runs its own scheduler;
+`@scheduler_lock`, like ShedLock's `@SchedulerLock`, lets the replica that takes the lock run a turn and the others
+skip it. The lock is a row of `snakeboot_scheduler_lock` in the database, held for at most `at_most_for` (the lock of
+a process that died frees itself) and at least `at_least_for`.
+
+```python
+@scheduled(fixed_rate=timedelta(hours=1))
+@scheduler_lock("hourly-report", at_most_for=timedelta(minutes=50), at_least_for=timedelta(minutes=5))
+def send_hourly_report(self) -> None: ...
+```
 
 **RabbitMQ.** With the table `[rabbitmq]` (extra `snakeboot[rabbitmq]`, through pika), `@rabbit_listener` makes a
 method of a component consume a queue, like `@RabbitListener` with `@QueueBinding`: the durable topic exchange, the
@@ -311,6 +374,41 @@ class GameStartedListener:
     def on_game_started(self, message: GameStartedMessage) -> None: ...  # a pydantic model
 ```
 
+**Health and metrics.** Like Spring Boot's actuator, the server answers beside the API, without a token:
+`/health/liveness` is UP while the process answers (Kubernetes's livenessProbe); `/health` and `/health/readiness`
+check every `HealthIndicator` and answer 503 when one part is DOWN (the readinessProbe). The bindings bring the checks
+of the database, Redis and RabbitMQ; an adapter that extends `HealthIndicator` adds its own. `/metrics` answers
+Prometheus with every meter of the `MeterRegistry`, which times every call as `http_server_requests_seconds` by
+method, route and status; an adapter injects it for counters, timers and gauges of its own. The metrics are those of
+one process: scale with replicas of one worker.
+
+```python
+class PaymentGatewayHealthIndicator(HealthIndicator):
+    @override
+    def check(self) -> None:
+        self._gateway.ping()  # raises when the gateway is down
+
+
+self._meters.counter("games_started", "Games started", tags={"game": "tictactoe"}).increment()
+```
+
+**Traces and logs.** Every call runs in a span of the caller's trace when it sends a W3C `traceparent`, or of a new
+trace; so does every message a `@rabbit_listener` receives, every scheduled run, and every
+`@application_module_listener`. The `RabbitTemplate` sends the `traceparent` along, and every log line carries the trace
+id, so one request can be followed through every service. `[logging] format = "ecs"` writes every line as JSON in the
+Elastic Common Schema, for Loki or Elasticsearch, like Spring Boot's structured logging.
+
+**CORS.** With `[cors]`, the pages of the origins it names may call the API from a browser, like a `CorsRegistry`;
+without it, none of another origin may. `*` with `allow_credentials = true` stops the start, as in Spring.
+
+```toml
+[cors]
+allowed_origins = ["https://games.example.com"]
+allowed_methods = ["GET", "POST", "PUT", "PATCH", "DELETE"]
+allowed_headers = ["Authorization", "Content-Type"]
+allow_credentials = false
+```
+
 **A cache.** An adapter asks for `Cache` by type: values JSON can hold, kept by key for a while. With `[cache]
 redis_url = "redis://redis:6379/1"` (extra `snakeboot[cache]`) it is Redis; a test gives an `InMemoryCache`.
 
@@ -318,9 +416,10 @@ redis_url = "redis://redis:6379/1"` (extra `snakeboot[cache]`) it is Redis; a te
 self._cache.put(question, {"text": answer, "sources": sources}, time_to_live=timedelta(hours=1))
 ```
 
-**Tests.** `TestApplication` starts the application as it runs, from its `application.toml`, with two differences, like
-`@SpringBootTest` with `@AutoConfigureTestDatabase`: `overrides` replace components with doubles, and the database is a
-fresh SQLite in memory whose tables come from the entities. `client()` calls the REST API in the same process, like
+**Tests.** `TestApplication` starts the application as it runs, from its `application.toml`, with three differences,
+like `@SpringBootTest` with `@AutoConfigureTestDatabase`: `overrides` replace components with doubles, the database is a
+fresh SQLite in memory whose tables come from the entities, and the `@application_module_listener` methods run on the
+caller's thread, so what they did is there when the call returns. `client()` calls the REST API in the same process, like
 `TestRestTemplate`; used as a context manager, the lifecycle runs around it.
 
 ```python
@@ -356,7 +455,7 @@ uv run ruff check        # Clean Code rules
 uv run mypy              # strict
 ```
 
-The PostgreSQL tests (migrations, JSONB, pgvector) run when `SNAKEBOOT_TEST_POSTGRESQL_URL` names a database they may
+The PostgreSQL tests (migrations, JSONB, pgvector, `SKIP LOCKED`, the scheduler locks) run when `SNAKEBOOT_TEST_POSTGRESQL_URL` names a database they may
 fill and empty:
 
 ```bash

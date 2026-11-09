@@ -109,7 +109,10 @@ def _mapped(description: EntityDescription) -> Table:
         if description.table in _METADATA.tables:
             raise InvalidEntityError(f"Two entities name the table {description.table!r}.")
         table = _table_of(description)
-        _REGISTRY.map_imperatively(description.entity_type, table)
+        version = description.version
+        # SQLAlchemy's version counter, like Hibernate's: UPDATE ... WHERE version = :read, else StaleDataError.
+        version_column = table.c[version.name] if version is not None else None
+        _REGISTRY.map_imperatively(description.entity_type, table, version_id_col=version_column)
         _MAPPED[description.entity_type] = table
     return table
 

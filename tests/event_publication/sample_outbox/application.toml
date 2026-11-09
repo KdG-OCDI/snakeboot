@@ -1,0 +1,15 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+workers = 1
+debug = false
+allowed_hosts = ["*"]
+log_level = "WARNING"
+
+# TestApplication replaces it with a database in memory.
+[database]
+host = "localhost"
+port = 55432
+name = "snakeboot"
+user = "snakeboot"
+password = "snakeboot"

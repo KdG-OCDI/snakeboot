@@ -5,6 +5,7 @@ import threading
 from pydantic import BaseModel
 
 from snakeboot.rabbitmq import RejectAndDontRequeueError, rabbit_listener
+from snakeboot.tracing import TraceContext
 
 
 class GameStarted(BaseModel):
@@ -19,6 +20,7 @@ class GameStartedListener:
 
     def __init__(self) -> None:
         self.started: list[GameStarted] = []
+        self.traces: list[str | None] = []
         self.attempts: dict[str, int] = {}
         self.received = threading.Event()
 
@@ -33,5 +35,7 @@ class GameStartedListener:
             raise RejectAndDontRequeueError("this game breaks the rules")
         if message.session_id == "crash":
             raise RuntimeError("the database is down")
+        span = TraceContext.current()
+        self.traces.append(span.trace_id if span is not None else None)
         self.started.append(message)
         self.received.set()

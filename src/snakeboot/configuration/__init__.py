@@ -13,7 +13,8 @@ application starts (`snakeboot.boot`), snakeboot reads every section, its own in
 `ServerProperties`, `DatabaseProperties` and `CacheProperties` are what the framework underneath needs, in no
 framework's terms; `OAuth2Properties` names the authorization server whose tokens `snakeboot.oauth2` accepts;
 `SchedulingProperties` turns `@scheduled` methods off in a process; `RabbitProperties` names the broker of
-`snakeboot.rabbitmq`.
+`snakeboot.rabbitmq`; `CorsProperties` the origins whose pages may call the REST API; `LoggingProperties` writes log
+lines as JSON; `EventsProperties` times the event publication registry.
 """
 
 from snakeboot.configuration.cache_properties import CacheProperties
@@ -24,8 +25,11 @@ from snakeboot.configuration.configuration_errors import (
 )
 from snakeboot.configuration.configuration_properties import configuration_properties
 from snakeboot.configuration.configuration_sources import BASE_FILE, PROFILE_VARIABLE
+from snakeboot.configuration.cors_properties import CorsProperties
 from snakeboot.configuration.database_properties import DatabaseProperties
+from snakeboot.configuration.events_properties import EventsProperties
 from snakeboot.configuration.load_configuration import begin_configuration, load_configuration
+from snakeboot.configuration.logging_properties import LoggingProperties
 from snakeboot.configuration.oauth2_properties import OAuth2Properties
 from snakeboot.configuration.rabbitmq_properties import RabbitListenerProperties, RabbitProperties
 from snakeboot.configuration.scheduling_properties import SchedulingProperties
@@ -40,8 +44,11 @@ __all__ = [
     "CacheProperties",
     "Configuration",
     "ConfigurationFileNotFoundError",
+    "CorsProperties",
     "DatabaseProperties",
+    "EventsProperties",
     "InvalidConfigurationPropertiesError",
+    "LoggingProperties",
     "OAuth2Properties",
     "RabbitListenerProperties",
     "RabbitProperties",

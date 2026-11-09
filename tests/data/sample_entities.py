@@ -7,14 +7,17 @@ from uuid import UUID
 
 from snakeboot.data import (
     Column,
+    CreatedBy,
     CreatedDate,
     CrudRepository,
     Id,
     Index,
     Json,
+    LastModifiedBy,
     LastModifiedDate,
     LockMode,
     PageRequest,
+    Version,
     entity,
     lock,
     query,
@@ -101,3 +104,20 @@ class GameRecord:
 
 class GameRecords(CrudRepository[GameRecord, UUID], Protocol):
     def find_by_status_and_join_deadline_less_than_equal(self, status: str, deadline: datetime) -> list[GameRecord]: ...
+
+
+@entity("data_workshop")
+@dataclass
+class WorkshopRecord:
+    """An entity that guards against lost updates and records who saved it."""
+
+    id: Annotated[str, Id()]
+    title: str
+    created_by: Annotated[str | None, CreatedBy()] = None
+    modified_by: Annotated[str | None, LastModifiedBy()] = None
+    version: Annotated[int | None, Version()] = None
+
+
+class WorkshopRecords(CrudRepository[WorkshopRecord, str], Protocol):
+    @lock(LockMode.PESSIMISTIC_WRITE_SKIP_LOCKED)
+    def find_by_title(self, title: str) -> list[WorkshopRecord]: ...

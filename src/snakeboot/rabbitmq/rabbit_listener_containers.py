@@ -22,6 +22,7 @@ from snakeboot.rabbitmq.rabbit_listener import (
     RabbitListenerMapping,
     RejectAndDontRequeueError,
 )
+from snakeboot.tracing import TRACEPARENT, TraceContext
 
 logger = logging.getLogger(__name__)
 
@@ -183,8 +184,12 @@ class _Consumer:
         finally:
             _close_quietly(connection)
 
-    def _on_message(self, channel: Any, delivery: Any, _properties: Any, body: bytes) -> None:
-        outcome = self._handled(body)
+    def _on_message(self, channel: Any, delivery: Any, properties: Any, body: bytes) -> None:  # noqa: PLR0917  # reason: pika calls it with four positional arguments
+        # The message continues the trace of whoever sent it, like Spring AMQP's observation.
+        headers = getattr(properties, "headers", None) or {}
+        traceparent = headers.get(TRACEPARENT)
+        with TraceContext.started(traceparent if isinstance(traceparent, str) else None):
+            outcome = self._handled(body)
         if outcome is _Outcome.DONE:
             channel.basic_ack(delivery_tag=delivery.delivery_tag)
         else:

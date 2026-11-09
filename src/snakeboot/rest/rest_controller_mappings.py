@@ -47,13 +47,17 @@ class ExceptionHandlerMapping:
 
 @dataclass(frozen=True, slots=True)
 class DeclaredEndpoint:
-    """One `@route` method of one controller, read and checked, as a binding is about to publish it."""
+    """One `@route` method of one controller, read and checked, as a binding is about to publish it.
+
+    `roles` are the roles of which a caller needs one (`@roles_allowed`); empty, any authenticated caller will do.
+    """
 
     controller_class: type
     method: Callable[..., Any]
     prefix: str
     route_mapping: RouteMapping
     signature: EndpointSignature
+    roles: frozenset[str] = frozenset()
 
     @property
     def name(self) -> str:

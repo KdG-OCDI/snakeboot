@@ -3,6 +3,61 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.9,<0.10`.
 
+## Unreleased
+
+What most enterprise applications need from Spring Boot next: authorization, reliable events, optimistic locking,
+the actuator, traces and structured logs, a lock for scheduled work, and CORS.
+
+- `snakeboot.security` (standard library only): `Principal` moved here and has `roles` (`has_role`,
+  `has_any_role`); `SecurityContext`, like `SecurityContextHolder`, holds the principal of the call in hand.
+  `snakeboot.rest.Principal` is the same class.
+- `snakeboot.rest`: `@roles_allowed("admin", ...)` on an endpoint or a controller, like `@RolesAllowed`: a caller with
+  none of the roles is answered 403 `{"detail": "Forbidden"}`. An endpoint's own roles replace its controller's; roles
+  on a public endpoint, or without a `BearerAuthentication`, stop the start. `BearerAuthentication.authenticate` may
+  return a `Principal` with roles instead of an id. The web binding signs the caller in to the `SecurityContext` while
+  the endpoint runs.
+- `snakeboot.oauth2`: `JwtBearerAuthentication` returns a `Principal` whose roles are Keycloak's realm roles, its client
+  roles for the audience and a plain `roles` claim; `roles_of(claims)` may be overridden.
+- `snakeboot.data`: `Version()`, like JPA's `@Version`: an update holds only while the row has the version the entity was
+  read with, else `OptimisticLockingFailureError`. `CreatedBy()` and `LastModifiedBy()` fill a `str | None` with the
+  signed-in principal's name. A broken constraint is a `DataIntegrityViolationError`. `LockMode.PESSIMISTIC_WRITE_SKIP_LOCKED`
+  is `SELECT ... FOR UPDATE SKIP LOCKED`.
+- `snakeboot.events`: `@application_module_listener`, like Spring Modulith's `@ApplicationModuleListener`: after the
+  commit, on the application's `TaskExecutor` (eight threads), in a transaction of its own, in the trace of the
+  publisher. `ListenerMapping.delivery` (`Delivery`) replaces `ListenerMapping.after_commit`.
+- `snakeboot.event_publication`: with `[database]`, the event publication registry, a transactional outbox like Spring
+  Modulith's JDBC registry. The publisher's transaction writes one row of `snakeboot_event_publication` per module
+  listener (the event as JSON); the listener's transaction deletes it. A failed or lost publication is delivered again,
+  ten times at most, by a lifecycle component that also shows `snakeboot_event_publications_incomplete`. The optional
+  table `[events]` (`EventsProperties`: `resubmit_every`, `in_flight`, `retry_after`, `max_attempts`) sets that timing,
+  like `spring.modulith.events.*`.
+- `snakeboot.scheduling`: `@scheduler_lock(name, at_most_for=..., at_least_for=...)`, like ShedLock's
+  `@SchedulerLock`: one replica runs a turn, the others skip it. Every scheduled run is a trace of its own.
+- `snakeboot.scheduler_lock`: with `[database]`, the locks as rows of `snakeboot_scheduler_lock`.
+- `snakeboot.actuator` (wireup only): `HealthIndicator`, `ApplicationHealth` and `MeterRegistry` (counters, timers as
+  histograms, gauges, in Prometheus's text format, without a client library). The database, Redis and RabbitMQ bring
+  their indicators.
+- `snakeboot.fastapi_web`: `/health` checks every indicator and answers 503 when one is DOWN; `/health/liveness` and
+  `/health/readiness` for Kubernetes's probes; `/metrics` for Prometheus, with `http_server_requests_seconds` per
+  method, route and status. Every call runs in a span of the caller's `traceparent`, or of a new trace. `[cors]`
+  (`CorsProperties`) names the origins whose pages may call the API.
+- `snakeboot.tracing` (standard library only): `TraceContext`, W3C Trace Context. The `RabbitTemplate` sends the
+  `traceparent`, a `@rabbit_listener` continues it, and every log line carries the trace id.
+- `[logging] format = "ecs"` (`LoggingProperties`) writes every log line as JSON in the Elastic Common Schema.
+- `TestApplication` runs the `@application_module_listener` methods on the caller's thread.
+- `make_migration` writes the tables of snakeboot's own entities (`snakeboot_event_publication`,
+  `snakeboot_scheduler_lock`) into the application's migrations.
+
+Moving an application from 0.9:
+
+| 0.9 | Unreleased |
+|---|---|
+| `/health` answers `{"status": "ok", "service": ...}`, always 200 | `{"status": "UP", "service": ..., "components": {...}}`, 503 when a part is DOWN |
+| a liveness probe on `/health` | a liveness probe on `/health/liveness`, a readiness probe on `/health/readiness` |
+| `JwtBearerAuthentication.authenticate(token) == "ann"` | `== Principal("ann", roles=...)` |
+| `ListenerMapping(event_types, after_commit=True)` | `ListenerMapping(event_types, Delivery.AFTER_COMMIT)` |
+| `python -m myapp make_migration` with `[database]` | writes `snakeboot_event_publication` and `snakeboot_scheduler_lock` once; run `migrate` |
+
 ## 0.9.0
 
 - `python -m myapp serve` starts the web server, like the server Spring Boot embeds: uvicorn, where `[server] host`

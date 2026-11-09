@@ -1,6 +1,7 @@
 import inspect
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
+from typing import Any
 
 from snakeboot.component_scan import ComponentScan
 from snakeboot.rest.bearer_authentication import AUTHENTICATION_MARKER_ATTRIBUTE, BearerAuthentication
@@ -17,6 +18,7 @@ from snakeboot.rest.rest_controller_mappings import (
     ExceptionHandlerMapping,
     RouteMapping,
 )
+from snakeboot.rest.roles_allowed import ROLES_ATTRIBUTE, roles_of
 
 
 @dataclass(frozen=True, slots=True)
@@ -53,8 +55,8 @@ class ControllerScan:
         scanned = ControllerScan(ComponentScan.of(MyApplication)).find()
 
     Like Spring, it refuses to start on an ambiguous API: two endpoints for the same HTTP method and path, two
-    advice methods for the same error type, or two authentications. An endpoint that asks for a `Principal` while
-    nobody authenticates its calls stops the start too.
+    advice methods for the same error type, or two authentications. An endpoint that asks for a `Principal` or names
+    roles while nobody authenticates its calls stops the start too.
     """
 
     def __init__(self, component_scan: ComponentScan) -> None:
@@ -68,6 +70,7 @@ class ControllerScan:
         authentication = self._authentication()
         _refuse_ambiguous_routes(endpoints)
         _refuse_principals_nobody_supplies(endpoints, authenticated=authentication is not None)
+        _refuse_roles_nobody_checks(endpoints, authenticated=authentication is not None)
         error_handlers = [handler for advice in advices for handler in self._error_handlers_of(advice)]
         _refuse_ambiguous_error_handlers(error_handlers)
         return ScannedControllers(controllers, advices, endpoints, error_handlers, authentication)
@@ -81,6 +84,7 @@ class ControllerScan:
                 mapping.prefix,
                 route_mapping,
                 EndpointSignature.of(controller_class, method, route_mapping.response),
+                _roles_of(controller_class, method, route_mapping),
             )
             for _, method in inspect.getmembers(controller_class, inspect.isfunction)
             if isinstance(route_mapping := getattr(method, ROUTE_MAPPING_ATTRIBUTE, None), RouteMapping)
@@ -135,6 +139,26 @@ def _refuse_principals_nobody_supplies(endpoints: Sequence[DeclaredEndpoint], *,
         if not authenticated:
             raise InvalidRestControllerError(
                 f"{endpoint.name} asks for a Principal, but the component scan declares no BearerAuthentication."
+            )
+
+
+def _roles_of(controller_class: type, method: Callable[..., Any], route_mapping: RouteMapping) -> frozenset[str]:
+    # A public endpoint of a controller that names roles answers anybody: the method's own declaration wins.
+    if route_mapping.public:
+        if getattr(method, ROLES_ATTRIBUTE, None) is not None:
+            raise InvalidRestControllerError(
+                f"{controller_class.__name__}.{method.__name__} is public, so nobody is authenticated: it cannot "
+                "name roles."
+            )
+        return frozenset()
+    return roles_of(controller_class, method)
+
+
+def _refuse_roles_nobody_checks(endpoints: Sequence[DeclaredEndpoint], *, authenticated: bool) -> None:
+    for endpoint in endpoints:
+        if endpoint.roles and not authenticated:
+            raise InvalidRestControllerError(
+                f"{endpoint.name} names roles, but the component scan declares no BearerAuthentication."
             )
 
 

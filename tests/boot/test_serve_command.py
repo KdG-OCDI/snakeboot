@@ -67,7 +67,7 @@ def test_the_factory_builds_the_application_the_environment_names(monkeypatch: p
     monkeypatch.setenv(APPLICATION_VARIABLE, SAMPLE)
 
     with TestClient(application_from_environment()) as client:
-        assert client.get("/health").json() == {"status": "ok", "service": "sample_service"}
+        assert client.get("/health/liveness").json() == {"status": "UP"}
 
 
 @pytest.mark.parametrize("named", ["", "tests.nowhere:Application", f"{SAMPLE}Missing", "os:sep"])

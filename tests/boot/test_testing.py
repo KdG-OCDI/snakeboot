@@ -74,3 +74,14 @@ def test_overrides_may_be_built_before_the_call(announcer: RecordingAnnouncer) -
 
     with TestApplication.start(SampleServiceApplication, overrides=overrides) as started:
         assert started.get(Announcer) is announcer
+
+
+def test_the_health_checks_the_database_and_the_metrics_time_the_calls(application: TestApplication) -> None:
+    client = application.client()
+    client.post("/api/games", json={"status": "waiting"})
+
+    health = client.get("/health").json()
+    metrics = client.get("/metrics").text
+
+    assert health == {"status": "UP", "service": "sample_service", "components": {"database": {"status": "UP"}}}
+    assert 'http_server_requests_seconds_count{method="POST",status="201",uri="/api/games"} 1.0' in metrics

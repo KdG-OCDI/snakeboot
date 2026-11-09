@@ -4,8 +4,15 @@ from functools import reduce
 from importlib import import_module
 from typing import TYPE_CHECKING, Final
 
+from snakeboot.actuator import Actuator
 from snakeboot.application import ApplicationContext, ConditionalModules, run_application
-from snakeboot.configuration import CacheProperties, DatabaseProperties, RabbitProperties, ServerProperties
+from snakeboot.configuration import (
+    CacheProperties,
+    CorsProperties,
+    DatabaseProperties,
+    RabbitProperties,
+    ServerProperties,
+)
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
 
@@ -17,14 +24,19 @@ CONDITIONAL_MODULES: Final[ConditionalModules] = {
     DatabaseProperties: (
         "snakeboot.sqlalchemy_data.sqlalchemy_data_injectable",
         "snakeboot.sqlalchemy_data.migration_commands",
+        "snakeboot.event_publication.event_publication_record",
+        "snakeboot.event_publication.event_publication_injectable",
+        "snakeboot.scheduler_lock.scheduler_lock_record",
+        "snakeboot.scheduler_lock.scheduler_lock_injectable",
     ),
     RabbitProperties: ("snakeboot.rabbitmq.rabbitmq_injectable",),
     CacheProperties: ("snakeboot.redis_cache.redis_cache_injectable",),
 }
 """Which binding joins the container for which table, like Spring Boot's conditional auto-configuration.
 
-`[server]` brings `serve`. An application without `[database]` imports no SQLAlchemy, one without `[rabbitmq]` no
-pika, one without `[cache]` no Redis client.
+`[server]` brings `serve`. `[database]` brings the event publication registry of the `@application_module_listener`
+methods and the locks of `@scheduler_lock` with it. An application without `[database]` imports no SQLAlchemy, one
+without `[rabbitmq]` no pika, one without `[cache]` no Redis client.
 """
 
 APPLICATION_VARIABLE: Final = "SNAKEBOOT_APPLICATION"
@@ -56,7 +68,7 @@ def asgi_application(application: type) -> LifecycleAsgiApplication:
     async def lifecycle() -> ApplicationLifecycle:
         return context.get(ApplicationLifecycle)
 
-    return LifecycleAsgiApplication(_web_api(context), lifecycle=lifecycle)
+    return LifecycleAsgiApplication(web_api(context), lifecycle=lifecycle)
 
 
 def application_from_environment() -> LifecycleAsgiApplication:
@@ -79,8 +91,16 @@ def application_variable_of(application: type) -> str:
     return f"{application.__module__}:{application.__qualname__}"
 
 
-def _web_api(context: ApplicationContext) -> "FastAPI":
+def web_api(context: ApplicationContext) -> "FastAPI":
+    """Returns the REST API of a started application, with its `[server]`, its `[cors]` and its actuator."""
     # Imported here: a process that only runs a command needs no web framework.
     from snakeboot.fastapi_web import rest_api  # noqa: PLC0415  # reason: FastAPI loads only for the server
 
-    return rest_api(context.application, context.get, server=context.configuration.get(ServerProperties))
+    configuration = context.configuration
+    return rest_api(
+        context.application,
+        context.get,
+        server=configuration.get(ServerProperties),
+        cors=configuration.get(CorsProperties) if CorsProperties in configuration.sections else None,
+        actuator=context.get(Actuator),
+    )

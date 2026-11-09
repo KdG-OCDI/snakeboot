@@ -11,30 +11,38 @@
         def find_by_status(self, status: str) -> list[GameRecord]: ...
 
 An adapter asks for `GameRecords` by type and maps its records to the domain. snakeboot implements the interface
-when its module is imported, and stops the start when it cannot. It knows wireup and nothing else: the binding of a
-persistence framework (`snakeboot.sqlalchemy_data`, when the configuration has `[database]`) runs the queries, and
-its schema comes from SQL migrations, so an application keeps its entities when the framework changes.
+when its module is imported, and stops the start when it cannot. A `Version()` field guards against lost updates
+(`OptimisticLockingFailureError`); `CreatedBy()` and `LastModifiedBy()` record who saved, from the `SecurityContext`.
+
+It knows wireup and `snakeboot.security`: the binding of a persistence framework (`snakeboot.sqlalchemy_data`, when
+the configuration has `[database]`) runs the queries, and its schema comes from SQL migrations, so an application
+keeps its entities when the framework changes.
 """
 
 from snakeboot.data.crud_repository import REPOSITORY_ATTRIBUTE, CrudRepository
 from snakeboot.data.data_errors import (
+    DataIntegrityViolationError,
     EmptyResultError,
     IncorrectResultSizeError,
     InvalidEntityError,
     InvalidRepositoryError,
+    OptimisticLockingFailureError,
 )
 from snakeboot.data.derived_query import Action, Condition, DerivedQuery, Operator, Ordering, derive_query
 from snakeboot.data.entity import (
     ENTITY_ATTRIBUTE,
     Column,
+    CreatedBy,
     CreatedDate,
     EntityDescription,
     Id,
     Index,
     Json,
+    LastModifiedBy,
     LastModifiedDate,
     Property,
     Vector,
+    Version,
     description_of,
     entity,
 )
@@ -47,8 +55,10 @@ __all__ = [
     "Action",
     "Column",
     "Condition",
+    "CreatedBy",
     "CreatedDate",
     "CrudRepository",
+    "DataIntegrityViolationError",
     "DerivedQuery",
     "EmptyResultError",
     "EntityDescription",
@@ -58,16 +68,19 @@ __all__ = [
     "InvalidEntityError",
     "InvalidRepositoryError",
     "Json",
+    "LastModifiedBy",
     "LastModifiedDate",
     "LockMode",
     "NativeQuery",
     "Operator",
+    "OptimisticLockingFailureError",
     "Ordering",
     "PageRequest",
     "Property",
     "QueryCall",
     "RepositoryOperations",
     "Vector",
+    "Version",
     "derive_query",
     "description_of",
     "entity",

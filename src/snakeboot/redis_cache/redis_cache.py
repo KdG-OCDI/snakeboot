@@ -34,6 +34,10 @@ class RedisCache(Cache):
     def evict(self, key: str) -> None:
         self._client.delete(key)
 
+    def ping(self) -> None:
+        """Asks Redis whether it answers; raises when it does not."""
+        self._client.ping()
+
     def close(self) -> None:
         """Closes the connections to Redis."""
         self._client.close()

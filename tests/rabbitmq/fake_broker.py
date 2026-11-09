@@ -37,7 +37,7 @@ class FakeBroker:
     published: list[Published] = field(default_factory=list)
     connections: list["FakeConnection"] = field(default_factory=list)
     settled: threading.Event = field(default_factory=threading.Event)
-    _pending: "queue.Queue[tuple[str, bytes]]" = field(default_factory=queue.Queue)
+    _pending: "queue.Queue[tuple[str, bytes, dict[str, str] | None]]" = field(default_factory=queue.Queue)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def connect(self, _parameters: Any) -> "FakeConnection":
@@ -50,11 +50,11 @@ class FakeBroker:
             self.connections.append(connection)
             return connection
 
-    def deliver(self, queue_name: str, body: bytes) -> None:
-        """Puts a message on a queue, for the listener of that queue."""
-        self._pending.put((queue_name, body))
+    def deliver(self, queue_name: str, body: bytes, headers: dict[str, str] | None = None) -> None:
+        """Puts a message, with its headers, on a queue, for the listener of that queue."""
+        self._pending.put((queue_name, body, headers))
 
-    def next_delivery(self, timeout: float) -> tuple[str, bytes] | None:
+    def next_delivery(self, timeout: float) -> tuple[str, bytes, dict[str, str] | None] | None:
         """The next message for a consumer, or None after `timeout`."""
         try:
             return self._pending.get(timeout=timeout)
@@ -129,13 +129,14 @@ class FakeConnection:
         delivery = self._broker.next_delivery(timeout=time_limit)
         if delivery is None:
             return
-        queue_name, body = delivery
+        queue_name, body, headers = delivery
         for channel in self.channels:
             if queue_name in channel.consumers:
                 self._tags += 1
-                channel.consumers[queue_name](channel, SimpleNamespace(delivery_tag=self._tags), None, body)
+                properties = SimpleNamespace(headers=headers)
+                channel.consumers[queue_name](channel, SimpleNamespace(delivery_tag=self._tags), properties, body)
                 return
-        self._broker.deliver(queue_name, body)
+        self._broker.deliver(queue_name, body, headers)
         time.sleep(time_limit)
 
     def close(self) -> None:

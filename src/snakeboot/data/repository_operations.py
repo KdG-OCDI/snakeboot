@@ -15,6 +15,10 @@ class LockMode(StrEnum):
     """`SELECT ... FOR UPDATE`: no other transaction changes or locks the rows meanwhile."""
     PESSIMISTIC_READ = "pessimistic_read"
     """`SELECT ... FOR SHARE`: other transactions may read and share-lock the rows, not change them."""
+    PESSIMISTIC_WRITE_SKIP_LOCKED = "pessimistic_write_skip_locked"
+    """`SELECT ... FOR UPDATE SKIP LOCKED`: as `PESSIMISTIC_WRITE`, but leaves out the rows another transaction locked
+    instead of waiting for them, so the workers of a queue each take rows of their own (Hibernate's
+    `UPGRADE_SKIPLOCKED`)."""
 
 
 @dataclass(frozen=True, slots=True)

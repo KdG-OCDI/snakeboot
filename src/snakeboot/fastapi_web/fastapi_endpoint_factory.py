@@ -1,26 +1,22 @@
 import functools
 import inspect
 from collections.abc import Callable
+from contextlib import AbstractContextManager, nullcontext
 from typing import Any, Final
 
 from fastapi import Request, Security
 from fastapi.encoders import jsonable_encoder
 from starlette.responses import JSONResponse, Response
 
-from snakeboot.fastapi_web.bearer_token import BearerToken, ComponentResolver
+from snakeboot.fastapi_web.bearer_token import BearerToken, ComponentResolver, principal_of
 from snakeboot.fastapi_web.event_stream import event_stream_response
-from snakeboot.rest import (
-    DeclaredEndpoint,
-    DeclaredErrorHandler,
-    NoAuthenticatedPrincipalError,
-    Principal,
-    ServerSentEvents,
-)
+from snakeboot.rest import DeclaredEndpoint, DeclaredErrorHandler, ServerSentEvents
+from snakeboot.security import Principal, SecurityContext
 
 type ErrorAnswer = Callable[[Request, Exception], Response]
 
 PRINCIPAL_PARAMETER: Final = "snakeboot_principal"
-"""The hidden parameter through which FastAPI hands a view the id that the `BearerToken` found."""
+"""The hidden parameter through which FastAPI hands a view the `Principal` that the `BearerToken` found."""
 
 
 class FastApiEndpointFactory:
@@ -28,9 +24,10 @@ class FastApiEndpointFactory:
 
     FastAPI reads a view's signature to find path, query and body parameters. A view built here shows FastAPI the
     parameters the call carries, and hides `self` and every `Principal` parameter; an endpoint that needs a signed-in
-    caller gets the `BearerToken` as a security dependency instead. When called, the view asks the resolver for the
-    controller, fills the principals and calls the method. `ServerSentEvents` become a streamed response, `None`
-    (`-> None`) an empty one; FastAPI renders any other answer with the endpoint's response model.
+    caller gets the `BearerToken` of its roles as a security dependency instead. When called, the view asks the
+    resolver for the controller, fills the principals and calls the method with the caller signed in to the
+    `SecurityContext`. `ServerSentEvents` become a streamed response, `None` (`-> None`) an empty one; FastAPI renders
+    any other answer with the endpoint's response model.
 
     Resolving per call (not once at start-up) keeps a test's overrides working.
     """
@@ -46,9 +43,10 @@ class FastApiEndpointFactory:
 
         @functools.wraps(method)
         def view(**values: Any) -> Any:
-            name = values.pop(PRINCIPAL_PARAMETER, None)
-            principals = {parameter: _principal_named(name) for parameter in signature.principal_parameters}
-            answer = method(resolve(owner), **values, **principals)
+            caller = values.pop(PRINCIPAL_PARAMETER, None)
+            principals = {parameter: principal_of(caller) for parameter in signature.principal_parameters}
+            with _signed_in(caller):
+                answer = method(resolve(owner), **values, **principals)
             if isinstance(answer, ServerSentEvents):
                 return event_stream_response(answer, status)
             return Response(status_code=status) if signature.response is None else answer
@@ -75,14 +73,12 @@ class FastApiEndpointFactory:
                 inspect.Parameter(
                     PRINCIPAL_PARAMETER,
                     inspect.Parameter.KEYWORD_ONLY,
-                    default=Security(self._bearer_token),
-                    annotation=str,
+                    default=Security(self._bearer_token.requiring(endpoint.roles)),
+                    annotation=Principal,
                 )
             )
         return parameters
 
 
-def _principal_named(name: object) -> Principal:
-    if not isinstance(name, str):
-        raise NoAuthenticatedPrincipalError(f"Expected the id of a signed-in principal, got {name!r}.")
-    return Principal(name)
+def _signed_in(caller: object) -> AbstractContextManager[object]:
+    return SecurityContext.signed_in(caller) if isinstance(caller, Principal) else nullcontext()

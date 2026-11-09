@@ -8,6 +8,7 @@ from sqlalchemy import URL, Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
 
 from snakeboot.configuration import DatabaseProperties
+from snakeboot.sqlalchemy_data.data_access_errors import translated_errors
 
 logger = logging.getLogger(__name__)
 
@@ -27,6 +28,8 @@ class Database:
     savepoint inside the one that runs; `session()` hands the repositories the session of the running transaction, or
     runs their work in a transaction of its own. The session lives in a context variable, so each thread, and each
     task of an event loop, has its own. Entities stay readable after the commit: the session does not expire them.
+    SQLAlchemy's errors of data access leave both in snakeboot's terms (`OptimisticLockingFailureError`,
+    `DataIntegrityViolationError`).
     """
 
     def __init__(self, engine: Engine) -> None:
@@ -66,7 +69,8 @@ class Database:
         """Returns the session of the running transaction, or runs the block in a transaction of its own."""
         running = self._running.get()
         if running is not None:
-            yield running.session
+            with translated_errors():
+                yield running.session
         else:
             with self.transaction() as session:
                 yield session
@@ -84,7 +88,7 @@ class Database:
         self.engine.dispose()
 
     def _outermost(self) -> Iterator[Session]:
-        with self._sessions() as session, session.begin():
+        with translated_errors(), self._sessions() as session, session.begin():
             running = _Transaction(session)
             token = self._running.set(running)
             try:
