@@ -5,11 +5,12 @@ from pathlib import Path
 
 import pytest
 from pydantic import ValidationError
-from sqlalchemy import text
+from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 
 from snakeboot.configuration import DatabaseProperties
 from snakeboot.sqlalchemy_data import Database
-from snakeboot.sqlalchemy_data.schema_migrations import SchemaMigrations, migrations_in
+from snakeboot.sqlalchemy_data.schema_migrations import HISTORY_TABLE, SchemaMigrations, migrations_in
 
 WRITERS = 4
 WRITES = 25
@@ -86,4 +87,20 @@ def test_the_migrations_run_on_a_file(tmp_path: Path) -> None:
 
     assert [migration.label for migration in applied] == ["1"]
     assert SchemaMigrations(database, migrations_in([migrations])).pending() == []
+    database.close()
+
+
+def test_a_failing_migration_leaves_no_half_of_its_script_in_the_file(tmp_path: Path) -> None:
+    """Python's sqlite3 commits before `executescript`; the migration's own transaction must hold every statement."""
+    migrations = tmp_path / "migrations"
+    migrations.mkdir()
+    (migrations / "V1__create_seats.sql").write_text(
+        "CREATE TABLE seats (id INTEGER PRIMARY KEY);\nCREATE TABLE (;\n", encoding="utf-8"
+    )
+    database = file_database(tmp_path)
+
+    with pytest.raises(OperationalError):
+        SchemaMigrations(database, migrations_in([migrations])).migrate()
+
+    assert inspect(database.engine).get_table_names() == [HISTORY_TABLE]
     database.close()

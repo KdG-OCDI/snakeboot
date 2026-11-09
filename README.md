@@ -194,10 +194,14 @@ saving an entity another transaction changed since it was read raises `Optimisti
 saved, from the `SecurityContext`, next to `CreatedDate()` and `LastModifiedDate()`.
 
 ```python
-    updated_by: Annotated[str | None, LastModifiedBy()] = None   # the principal of the call, or None
-    version: Annotated[int | None, Version()] = None             # 1 for a new entity, one more per update
-``` A last parameter of type `PageRequest` returns one page. On PostgreSQL a
-`Vector(384)` field (extra `snakeboot[vector]`) holds an embedding for pgvector's similarity search in a `@query`.
+class GameRecord:
+    ...
+    updated_by: Annotated[str | None, LastModifiedBy()] = None  # the principal of the call, or None
+    version: Annotated[int | None, Version()] = None  # 1 for a new entity, one more per update
+```
+
+A repository method whose last parameter is a `PageRequest` returns one page. On PostgreSQL a `Vector(384)` field
+(extra `snakeboot[vector]`) holds an embedding for pgvector's similarity search in a `@query`.
 
 **Migrations.** The schema comes from SQL scripts, like Flyway's: `V1__create_tictactoe_game.sql`,
 `V2__add_a_winner.sql` in a `migrations` directory next to the entities. `python -m myapp migrate` runs the scripts the

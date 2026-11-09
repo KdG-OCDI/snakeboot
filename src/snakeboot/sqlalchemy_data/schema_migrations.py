@@ -12,6 +12,7 @@ from sqlalchemy import Column, Connection, MetaData, String, Table, select, text
 
 from snakeboot.sqlalchemy_data.database import Database
 from snakeboot.sqlalchemy_data.entity_mapping import AwareDateTime
+from snakeboot.sqlalchemy_data.sqlite import statements_of
 
 logger = logging.getLogger(__name__)
 
@@ -166,8 +167,10 @@ def _history_row(migration: Migration) -> dict[str, object]:
 
 
 def _execute_script(connection: Connection, sql: str) -> None:
-    # PostgreSQL runs a script of several statements at once; Python's sqlite3, in the tests, only as a script.
+    # PostgreSQL runs a script of several statements at once. Python's sqlite3 runs one statement per call, and its
+    # executescript would first commit the transaction the script belongs to: a failing script would leave half.
     if connection.dialect.name == "sqlite":
-        connection.connection.driver_connection.executescript(sql)  # type: ignore[union-attr]
+        for statement in statements_of(sql):
+            connection.exec_driver_sql(statement)
     else:
         connection.exec_driver_sql(sql)

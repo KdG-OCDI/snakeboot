@@ -3,6 +3,15 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.11,<0.12`.
 
+## 0.11.1
+
+- `migrate` on SQLite runs a script statement by statement in the migration's own transaction, so a failing script
+  leaves no trace, as on PostgreSQL. 0.11.0 ran it with Python's `executescript`, which commits the open transaction
+  first: the statements before the failing one stayed in the database while the history did not record the script,
+  and the next `migrate` stopped on what was left. `snakeboot.sqlalchemy_data.sqlite.statements_of` splits a script
+  where SQLite ends a statement, not at a `;` in a string, a comment or a trigger.
+- The README renders again from the entity example on: a code block's closing fence had a sentence on its line.
+
 ## 0.11.0
 
 - `[database]` is a PostgreSQL server or one SQLite file: `[database] file = "myapp.sqlite3"` keeps a service's

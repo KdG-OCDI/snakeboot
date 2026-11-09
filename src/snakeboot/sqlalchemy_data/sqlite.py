@@ -1,6 +1,7 @@
 """SQLite as snakeboot uses it: a file of `[database] file`, or the database in memory of a test."""
 
 import sqlite3
+from collections.abc import Iterator
 from datetime import UTC, date, datetime
 from typing import Any, Final
 
@@ -46,6 +47,21 @@ def open_transactions_with_sqlalchemy(engine: Engine, *, begin: str, journal_mod
     @event.listens_for(engine, "begin")
     def begin_transaction(connection: Any) -> None:
         connection.exec_driver_sql(begin)
+
+
+def statements_of(script: str) -> Iterator[str]:
+    """Splits an SQL script into its statements as SQLite reads them, to run them one by one in one transaction.
+
+    A `;` ends a statement only where `sqlite3.complete_statement` says it does: not inside a string, a comment or the
+    body of a trigger. What follows the last `;` (a statement without one, or only comments) is a statement too.
+    """
+    start = 0
+    for end, character in enumerate(script):
+        if character == ";" and sqlite3.complete_statement(script[start : end + 1]):
+            yield script[start : end + 1].strip()
+            start = end + 1
+    if rest := script[start:].strip():
+        yield rest
 
 
 def _sqlite_datetime(value: datetime) -> str:

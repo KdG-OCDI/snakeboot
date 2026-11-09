@@ -5,6 +5,7 @@ from pathlib import Path
 
 import pytest
 from sqlalchemy import inspect, text
+from sqlalchemy.exc import OperationalError
 
 from snakeboot.sqlalchemy_data import Database
 from snakeboot.sqlalchemy_data.schema_migrations import (
@@ -114,6 +115,39 @@ def test_a_version_the_database_ran_that_no_script_has_stops_the_run(database: D
 
     with pytest.raises(InvalidMigrationError, match="which no migrations directory holds"):
         SchemaMigrations(database, []).pending()
+
+
+def test_a_failing_script_leaves_no_trace_and_runs_again_once_fixed(database: Database, tmp_path: Path) -> None:
+    script = write(tmp_path, "V1__create_games.sql", "CREATE TABLE games (id INTEGER PRIMARY KEY);\nCREATE TABLE (;")
+
+    with pytest.raises(OperationalError):
+        SchemaMigrations(database, migrations_in([tmp_path])).migrate()
+
+    assert tables_of(database) == {HISTORY_TABLE}, "the first statement was rolled back with the second"
+    script.write_text("CREATE TABLE games (id INTEGER PRIMARY KEY);", encoding="utf-8")
+    assert [migration.label for migration in SchemaMigrations(database, migrations_in([tmp_path])).migrate()] == ["1"]
+
+
+def test_a_semicolon_in_a_string_a_comment_or_a_trigger_does_not_end_a_statement(
+    database: Database, tmp_path: Path
+) -> None:
+    write(
+        tmp_path,
+        "V1__create_games.sql",
+        """-- games; and their moves
+CREATE TABLE games (id INTEGER PRIMARY KEY, name TEXT NOT NULL DEFAULT 'a;b'); CREATE TABLE moves (game_id INTEGER);
+CREATE TRIGGER first_move AFTER INSERT ON games BEGIN
+    INSERT INTO moves (game_id) VALUES (new.id);
+END;
+INSERT INTO games (id) VALUES (1)
+/* no semicolon after the last statement */""",
+    )
+
+    SchemaMigrations(database, migrations_in([tmp_path])).migrate()
+
+    with database.session() as session:
+        assert session.execute(text("SELECT name FROM games")).scalar_one() == "a;b"
+        assert session.execute(text("SELECT game_id FROM moves")).scalar_one() == 1
 
 
 def test_without_migrations_only_the_history_table_is_made(database: Database) -> None:
