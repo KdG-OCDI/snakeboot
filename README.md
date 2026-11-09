@@ -139,6 +139,10 @@ name = "tictactoe"
 user = "tictactoe"
 ```
 
+A service that runs on one machine (a demo, a small tool) keeps its database in one SQLite file instead:
+`[database] file = "myapp.sqlite3"`, relative to the directory it starts in. A transaction then takes SQLite's write
+lock when it begins, so threads that write at once wait for each other; the migrations are SQL in SQLite's dialect.
+
 The values come from three places, a later one overriding an earlier one key by key:
 
 | Source | Holds | Spring Boot |

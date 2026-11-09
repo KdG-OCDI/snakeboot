@@ -1,7 +1,24 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.10,<0.11`.
+a minor release may break the API: pin `snakeboot>=0.11,<0.12`.
+
+## 0.11.0
+
+- `[database]` is a PostgreSQL server or one SQLite file: `[database] file = "myapp.sqlite3"` keeps a service's
+  database in that file, for a demo or a small tool on one machine. Every thread of the service shares it; a
+  transaction takes SQLite's write lock when it begins (`BEGIN IMMEDIATE`), in WAL mode, and waits up to 30 seconds
+  for another's, so threads that write at once wait for each other instead of failing. `migrate` and `make_migration`
+  work on it in SQLite's dialect. A table with a server's keys and `file` stops the start.
+- `snakeboot.sqlalchemy_data.sqlite`: `sqlite_file_engine` and `open_transactions_with_sqlalchemy`, which the database
+  in memory of a test now shares.
+- The migrations' history is read without SQLAlchemy's deprecated `Result.tuples()`: no more warnings.
+
+Moving an application from 0.10:
+
+| 0.10 | 0.11 |
+|---|---|
+| `DatabaseProperties.host`, `.port`, `.name`, `.user`, `.password` are `str`, `int`, `SecretStr` | they may be None (with `file`); a PostgreSQL table still needs every one of them |
 
 ## 0.10.2
 

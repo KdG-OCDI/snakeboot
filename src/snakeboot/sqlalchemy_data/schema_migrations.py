@@ -134,7 +134,7 @@ class SchemaMigrations:
     def _checked_pending(self, connection: Connection) -> list[Migration]:
         with connection.begin():
             _HISTORY.create(connection, checkfirst=True)
-            applied = dict(connection.execute(select(_HISTORY.c.version, _HISTORY.c.checksum)).tuples().all())
+            applied = dict(connection.execute(select(_HISTORY.c.version, _HISTORY.c.checksum)).all())
         known = {migration.label: migration for migration in self._migrations}
         for version, checksum in applied.items():
             _refuse_unknown_or_changed(version, checksum, known.get(version))

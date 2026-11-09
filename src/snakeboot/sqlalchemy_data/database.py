@@ -10,6 +10,7 @@ from sqlalchemy.orm import Session, sessionmaker
 from snakeboot.configuration import DatabaseProperties
 from snakeboot.sqlalchemy_data.data_access_errors import translated_errors
 from snakeboot.sqlalchemy_data.persistence_context import hold_what_is_loaded
+from snakeboot.sqlalchemy_data.sqlite import sqlite_file_engine
 
 logger = logging.getLogger(__name__)
 
@@ -44,11 +45,14 @@ class Database:
 
     @classmethod
     def of(cls, properties: DatabaseProperties) -> "Database":
-        """Returns the PostgreSQL database of `[database]`, whose pool tests a connection before it lends it."""
+        """Returns the database of `[database]`: its SQLite file, or its PostgreSQL server, whose pool tests a
+        connection before it lends it."""
+        if properties.file is not None:
+            return cls(sqlite_file_engine(properties.file))
         url = URL.create(
             "postgresql+psycopg",
             username=properties.user,
-            password=properties.password.get_secret_value(),
+            password=properties.password.get_secret_value() if properties.password is not None else None,
             host=properties.host,
             port=properties.port,
             database=properties.name,

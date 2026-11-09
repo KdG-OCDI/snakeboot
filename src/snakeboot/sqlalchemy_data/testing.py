@@ -1,15 +1,13 @@
-import sqlite3
 import threading
-from datetime import UTC, date, datetime
 from typing import Any, Final, override
 
-from sqlalchemy import Engine, StaticPool, create_engine, event
+from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from snakeboot.sqlalchemy_data.database import Database
+from snakeboot.sqlalchemy_data.sqlite import SQLITE_DATETIME, open_transactions_with_sqlalchemy
 
-SQLITE_DATETIME: Final = "%Y-%m-%d %H:%M:%S.%f"
-"""How SQLAlchemy writes a `datetime` column in SQLite: a `@query`'s parameter is written alike, so they compare."""
+__all__ = ["HOLD_SECONDS", "SQLITE_DATETIME", "OneThreadAtATimePool", "in_memory_database"]
 
 HOLD_SECONDS: Final = 10
 """How long a thread waits for the connection another holds, before the test fails instead of hanging."""
@@ -48,29 +46,9 @@ def in_memory_database() -> Database:
 
     Every thread shares its one connection, so a test's server threads see what the test wrote, and one thread at a
     time holds it (`OneThreadAtATimePool`): the test, a call to the API, the scheduler, a listener or the event
-    publication registry never begin a transaction inside another's. Python's sqlite3 opens transactions its own way,
-    which breaks savepoints; SQLAlchemy opens them here instead, as its documentation advises. A date or a time passed
-    to a `@query` is written as SQLAlchemy writes its columns, in UTC, instead of by sqlite3's deprecated default
-    adapters.
+    publication registry never begin a transaction inside another's. SQLAlchemy opens its transactions, with
+    savepoints and foreign keys, as for a file of `[database]` (`open_transactions_with_sqlalchemy`).
     """
-    sqlite3.register_adapter(datetime, _sqlite_datetime)
-    sqlite3.register_adapter(date, date.isoformat)
     engine = create_engine("sqlite://", connect_args={"check_same_thread": False}, poolclass=OneThreadAtATimePool)
-    _open_transactions_with_sqlalchemy(engine)
+    open_transactions_with_sqlalchemy(engine, begin="BEGIN")
     return Database(engine)
-
-
-def _sqlite_datetime(value: datetime) -> str:
-    in_utc = value.astimezone(UTC).replace(tzinfo=None) if value.tzinfo is not None else value
-    return in_utc.strftime(SQLITE_DATETIME)
-
-
-def _open_transactions_with_sqlalchemy(engine: Engine) -> None:
-    @event.listens_for(engine, "connect")
-    def connect(connection: Any, _record: object) -> None:
-        connection.isolation_level = None
-        connection.execute("PRAGMA foreign_keys=ON")
-
-    @event.listens_for(engine, "begin")
-    def begin(connection: Any) -> None:
-        connection.exec_driver_sql("BEGIN")

@@ -163,6 +163,7 @@ def test_a_password_never_shows() -> None:
     )
 
     assert "test-only-password" not in repr(database)
+    assert database.password is not None
     assert database.password.get_secret_value() == "test-only-password"
 
 
