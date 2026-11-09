@@ -45,6 +45,9 @@ the actuator, traces and structured logs, a lock for scheduled work, and CORS.
   `traceparent`, a `@rabbit_listener` continues it, and every log line carries the trace id.
 - `[logging] format = "ecs"` (`LoggingProperties`) writes every log line as JSON in the Elastic Common Schema.
 - `TestApplication` runs the `@application_module_listener` methods on the caller's thread.
+- The README says where an application's files live: `application.toml` and its profiles in the application package
+  (the package of the `@application_root` class, snakeboot's classpath root), migrations next to their entities,
+  `static/` and `templates/` kept free for pages.
 - `make_migration` writes the tables of snakeboot's own entities (`snakeboot_event_publication`,
   `snakeboot_scheduler_lock`) into the application's migrations.
 

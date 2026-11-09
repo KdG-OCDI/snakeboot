@@ -78,11 +78,38 @@ from snakeboot.boot import run
 run(MyApplication)
 ```
 
-The application writes no settings and no URLs. `snakeboot.boot` reads `application.toml` next to the application
-class, builds wireup's container from the component scan, and adds what the tables ask for, like Spring Boot's
+The application writes no settings and no URLs. `snakeboot.boot` reads `application.toml` in the application package,
+builds wireup's container from the component scan, and adds what the tables ask for, like Spring Boot's
 conditional auto-configuration: SQLAlchemy and the transaction manager of `@transactional` with `[database]`, Redis
 with `[cache]`, RabbitMQ with `[rabbitmq]`. An application without a table imports none of those. The REST API lives
 under `/api/` (Swagger UI at `/api/docs`), next to `/health` and `/metrics`.
+
+**Where the files live.** The application package is the package of the class marked with `@application_root`, also
+when `base_packages` names others: `myapp` in the example above, not `myapp_core`. It is to snakeboot what the root of
+the classpath is to Spring Boot. Python compiles nothing apart, so there is no `src/main/resources`: snakeboot reads
+its files as package data, and a source checkout and an installed wheel find them alike.
+
+```text
+myapp/                              the application package
+├── __main__.py                     run(MyApplication)
+├── myapp_application.py            @application_root
+├── application.toml                every value the application runs with
+├── application-local.toml          what the profile "local" changes
+└── games/                          a bounded context
+    ├── game_record.py              @entity
+    └── migrations/
+        └── V1__create_games.sql    next to the entities whose tables it creates
+```
+
+| File | Where | Spring Boot |
+|---|---|---|
+| `application.toml`, `application-<profile>.toml` | in the application package | `src/main/resources/application.yml`, `application-<profile>.yml` |
+| `migrations/V<n>__<description>.sql` | next to the module of the entities whose tables they change | `src/main/resources/db/migration/` |
+| `static/`, `templates/` | reserved in the application package, for when snakeboot serves pages | `src/main/resources/static/`, `templates/` |
+
+The migrations stay with their entities rather than in one place, so each bounded context keeps its own schema;
+`make_migration` writes into that directory, and `--into` chooses one when the entities live in several. Moving the
+application class into another package moves where `application.toml` is looked for.
 
 **Typed configuration.** A `Section` (a frozen Pydantic model that refuses unknown keys, the base class of every
 configuration model) is bound to one table of `application.toml`, like `@ConfigurationProperties`. A section is a

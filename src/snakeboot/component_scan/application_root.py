@@ -37,7 +37,11 @@ def application_root[C: type](
     class belongs in the top package (`myapp/myapp_application.py`). `base_packages` names the packages of the
     container instead, like `scanBasePackages`: an application that only assembles packages living elsewhere.
     Use it bare (`@application_root`) or with arguments (`@application_root(base_packages=(...), exclude=(...))`).
-    `ComponentScan.of(...)` returns the scan; the package of the class holds the application's files.
+    `ComponentScan.of(...)` returns the scan.
+
+    The package of the class is the application package, whatever `base_packages` says: the root of snakeboot's
+    classpath, like `src/main/resources` in Spring Boot. It holds `application.toml` and the files of the profiles;
+    `static/` and `templates/` are kept free there for pages. Migrations live next to their entities instead.
     """
 
     def declare(declared_class: C) -> C:
