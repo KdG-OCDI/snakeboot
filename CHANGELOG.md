@@ -1,9 +1,9 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.9,<0.10`.
+a minor release may break the API: pin `snakeboot>=0.10,<0.11`.
 
-## Unreleased
+## 0.10.0
 
 What most enterprise applications need from Spring Boot next: authorization, reliable events, optimistic locking,
 the actuator, traces and structured logs, a lock for scheduled work, and CORS.
@@ -53,7 +53,7 @@ the actuator, traces and structured logs, a lock for scheduled work, and CORS.
 
 Moving an application from 0.9:
 
-| 0.9 | Unreleased |
+| 0.9 | 0.10 |
 |---|---|
 | `/health` answers `{"status": "ok", "service": ...}`, always 200 | `{"status": "UP", "service": ..., "components": {...}}`, 503 when a part is DOWN |
 | a liveness probe on `/health` | a liveness probe on `/health/liveness`, a readiness probe on `/health/readiness` |
