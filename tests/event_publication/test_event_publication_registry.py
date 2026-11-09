@@ -79,18 +79,13 @@ def test_the_resubmitter_resubmits_at_start_and_shows_what_is_owed(application: 
         meters,
     )
 
+    # Its thread resubmits once before it first waits, and stop lets that round finish.
     resubmitter.start()
-    try:
-        assert f"{INCOMPLETE_METRIC} " in meters.scrape()
-        for _ in range(200):
-            if records.count() == 0:
-                break
-            threading.Event().wait(0.01)
-    finally:
-        resubmitter.stop()
+    resubmitter.stop()
 
     assert records.count() == 0
     assert not resubmitter.running
+    assert f"{INCOMPLETE_METRIC} 0.0" in meters.scrape()
 
 
 def test_the_resubmitter_starts_nothing_without_module_listeners() -> None:

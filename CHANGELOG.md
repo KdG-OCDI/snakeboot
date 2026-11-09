@@ -44,7 +44,10 @@ the actuator, traces and structured logs, a lock for scheduled work, and CORS.
 - `snakeboot.tracing` (standard library only): `TraceContext`, W3C Trace Context. The `RabbitTemplate` sends the
   `traceparent`, a `@rabbit_listener` continues it, and every log line carries the trace id.
 - `[logging] format = "ecs"` (`LoggingProperties`) writes every log line as JSON in the Elastic Common Schema.
-- `TestApplication` runs the `@application_module_listener` methods on the caller's thread.
+- `TestApplication` runs the `@application_module_listener` methods on the caller's thread. Its database in memory
+  lets one thread at a time hold its one connection, so a call to the API, the scheduler, a listener and the
+  registry's resubmission never begin a transaction inside another's (SQLite's "cannot start a transaction within a
+  transaction").
 - The README says where an application's files live: `application.toml` and its profiles in the application package
   (the package of the `@application_root` class, snakeboot's classpath root), migrations next to their entities,
   `static/` and `templates/` kept free for pages.
