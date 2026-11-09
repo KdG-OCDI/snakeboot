@@ -1,8 +1,10 @@
 """A `Version()` field guards an entity against lost updates; `CreatedBy()` and `LastModifiedBy()` record who saved."""
 
+import gc
 from collections.abc import Iterator
 
 import pytest
+from sqlalchemy import text
 
 from snakeboot.data import (
     REPOSITORY_ATTRIBUTE,
@@ -116,3 +118,26 @@ def test_skip_locked_reads_like_a_plain_query_where_nothing_is_locked(workshops:
     workshops.save(WorkshopRecord("w1", "Clean Code"))
 
     assert [workshop.id for workshop in workshops.find_by_title("Clean Code")] == ["w1"]
+
+
+def test_in_a_transaction_the_row_as_read_is_held_although_nobody_holds_its_entity(
+    database: Database, workshops: WorkshopRecords
+) -> None:
+    # The pattern of a hexagonal adapter: read a record, map it to the domain and let it go; save a new record later.
+    workshops.save(WorkshopRecord("w1", "Clean Code"))
+
+    def save_after_another_transaction_saved() -> None:
+        with database.transaction() as session:
+            read = workshops.find_by_id("w1")
+            assert read is not None
+            title = read.title
+            del read
+            gc.collect()
+            session.execute(text("UPDATE data_workshop SET version = version + 1"))  # another transaction, meanwhile
+            held = workshops.find_by_id("w1")
+            assert held is not None
+            workshops.save(WorkshopRecord("w1", f"{title}, changed", version=held.version))
+
+    with pytest.raises(OptimisticLockingFailureError):
+        save_after_another_transaction_saved()
+    assert workshops.find_by_id("w1") == WorkshopRecord("w1", "Clean Code", version=1)

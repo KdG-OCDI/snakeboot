@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session, sessionmaker
 
 from snakeboot.configuration import DatabaseProperties
 from snakeboot.sqlalchemy_data.data_access_errors import translated_errors
+from snakeboot.sqlalchemy_data.persistence_context import hold_what_is_loaded
 
 logger = logging.getLogger(__name__)
 
@@ -27,7 +28,10 @@ class Database:
     Like Spring's `EntityManager` bound to a transaction: `transaction()` opens a session and its transaction, or a
     savepoint inside the one that runs; `session()` hands the repositories the session of the running transaction, or
     runs their work in a transaction of its own. The session lives in a context variable, so each thread, and each
-    task of an event loop, has its own. Entities stay readable after the commit: the session does not expire them.
+    task of an event loop, has its own. Like JPA's persistence context, a transaction's session holds every entity it
+    read until the transaction ends: a repository hands out one object per row, as the row was first read, so a
+    `Version()` is checked against the version this transaction read. Entities stay readable after the commit: the
+    session does not expire them.
     SQLAlchemy's errors of data access leave both in snakeboot's terms (`OptimisticLockingFailureError`,
     `DataIntegrityViolationError`).
     """
@@ -35,6 +39,7 @@ class Database:
     def __init__(self, engine: Engine) -> None:
         self.engine = engine
         self._sessions = sessionmaker(engine, expire_on_commit=False)
+        hold_what_is_loaded(self._sessions)
         self._running: ContextVar[_Transaction | None] = ContextVar(f"snakeboot-transaction-{id(self)}", default=None)
 
     @classmethod

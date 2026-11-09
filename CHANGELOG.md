@@ -3,6 +3,14 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.10,<0.11`.
 
+## 0.10.1
+
+- `snakeboot.sqlalchemy_data`: a transaction's session holds every entity it read until the transaction ends, like
+  JPA's persistence context. SQLAlchemy held an entity only while somebody else did, so an adapter that mapped a
+  record to its domain object and let the record go read the row afresh at its next query, with a version another
+  transaction had written meanwhile: a `Version()` never caught that lost update. A repository now hands out one object
+  per row in a transaction, as the row was first read.
+
 ## 0.10.0
 
 What most enterprise applications need from Spring Boot next: authorization, reliable events, optimistic locking,
