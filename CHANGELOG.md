@@ -43,6 +43,15 @@ Tests in Spring Boot's style, without conftest.py, fixtures or settings:
   `ApplicationContext.replace_component` replaces a component of the built container, and names what it lacks.
 - `snakeboot.rabbitmq.rabbit_listener_endpoints` finds the `@rabbit_listener` methods of an application, for the
   listener containers and the in-process template alike.
+- Test slices: `@web_test`, like `@WebMvcTest`, starts the REST layer alone (the modules of the controllers, advices,
+  authentication and sections), and `@application_module_test("auction_house.invoicing")`, like Spring Modulith's
+  `@ApplicationModuleTest`, starts bounded contexts without the others. What a slice leaves out, a test gives as a
+  `MockComponent`, which joins the container; a dependency nobody gave stops the test and names it.
+  `TestApplication.start(..., only=WebSlice() | ModuleSlice(...))`.
+- `snakeboot.component_scan.narrowed_application(application, modules)`: the application without those modules, its
+  package, configuration and OpenAPI definition kept.
+- What a module defines that the component scan excludes stays out of the container, even where a scanned module
+  imports it: wireup registers a module's imports too, so an `exclude` let a component in through an import.
 
 ## 0.11.1
 

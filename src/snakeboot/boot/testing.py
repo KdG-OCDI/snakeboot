@@ -1,28 +1,36 @@
 from collections.abc import Callable, Iterable, Mapping, Sequence
-from types import TracebackType
-from typing import TYPE_CHECKING, Any, Self, cast, override
+from dataclasses import dataclass
+from importlib import import_module
+from types import ModuleType, TracebackType
+from typing import TYPE_CHECKING, Any, Final, Self, cast, override
 from unittest.mock import Mock
 
 import wireup
+from wireup.errors import WireupError
 
 from snakeboot.application import ApplicationContext
 from snakeboot.boot.entry_points import CONDITIONAL_MODULES, web_api
 from snakeboot.cache import Cache, InMemoryCache
+from snakeboot.component_scan import ComponentScan, application_package, narrowed_application
 from snakeboot.configuration import (
     CacheProperties,
     Configuration,
     DatabaseProperties,
     RabbitProperties,
     ServerProperties,
+    sections_declared_in,
 )
 from snakeboot.events import ApplicationEventListener, SyncTaskExecutor, TaskExecutor, event_listener
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
 from snakeboot.rest import BearerAuthentication
+from snakeboot.rest.bearer_authentication import AUTHENTICATION_MARKER_ATTRIBUTE
+from snakeboot.rest.rest_controller_mappings import ADVICE_MARKER_ATTRIBUTE, CONTROLLER_MAPPING_ATTRIBUTE
 from snakeboot.security import Principal
 from snakeboot.testing.environment import TestEnvironment
 from snakeboot.testing.published_events import PublishedEvents
 from snakeboot.testing.signed_in_tokens import signed_in_principal
+from snakeboot.testing.slices import ApplicationSlice, ModuleSlice
 
 if TYPE_CHECKING:
     from httpx2 import Response
@@ -78,24 +86,33 @@ class TestApplication:
         *,
         environment: TestEnvironment | None = None,
         test_components: Mapping[Any, object] | None = None,
+        only: ApplicationSlice | None = None,
     ) -> Self:
         """Starts `application` with `overrides`, in `environment`: by default without a profile and in memory.
 
         `test_components` replace the components the application has, unless `overrides` replaces the same; for an
-        application without one of them, it does nothing.
+        application without one of them, it does nothing. `only` starts part of the application, a `WebSlice` or a
+        `ModuleSlice`: then `overrides` join the container, standing in for what the slice leaves out, and a
+        dependency nobody gave stops the start with its name.
         """
         environment = environment or TestEnvironment()
         context = ApplicationContext.of(
-            application, CONDITIONAL_MODULES, profile=environment.profile, properties=environment.properties
+            _narrowed(application, only),
+            CONDITIONAL_MODULES,
+            profile=environment.profile,
+            properties=environment.properties,
         )
         explicit = dict(overrides or {})
-        services = _test_services(context, environment, explicit)
+        doubles = _Doubles(_test_services(context, environment, explicit), explicit, joining=only is not None)
         try:
-            return cls._started(
-                context, environment=environment, services=services, explicit=explicit, test_components=test_components
-            )
+            return cls._started(context, environment=environment, doubles=doubles, test_components=test_components)
+        except WireupError as error:
+            _close(doubles.services.values())
+            if only is None:
+                raise
+            raise LookupError(f"{error}\n{_SLICE_HINT}") from error
         except BaseException:
-            _close(services.values())
+            _close(doubles.services.values())
             raise
 
     @property
@@ -176,18 +193,17 @@ class TestApplication:
         context: ApplicationContext,
         *,
         environment: TestEnvironment,
-        services: Mapping[Any, object],
-        explicit: Mapping[Any, object],
+        doubles: "_Doubles",
         test_components: Mapping[Any, object] | None,
     ) -> Self:
         events = PublishedEvents()
-        replacements: dict[Any, object] = {TaskExecutor: SyncTaskExecutor(), **services, **explicit}
-        context.refresh(replacements, additions=[_recording(events)])
+        context.refresh(doubles.replacing(), additions=[_recording(events), *doubles.joining_the_container()])
+        replacements = {**doubles.services, **doubles.explicit}
         replacements |= _replaced_where_present(context, test_components or {}, replacements)
         if DatabaseProperties in context.configuration.sections and environment.database is None:
             _create_tables(context)
         # What the test made for itself, it closes: the database of a test drops its PostgreSQL copy.
-        started = cls(context, replacements, published_events=events, owned=list(services.values()))
+        started = cls(context, replacements, published_events=events, owned=list(doubles.services.values()))
         started._accept_signed_in_tokens()
         return started
 
@@ -222,6 +238,46 @@ class _SignedInTokens(BearerAuthentication, component=False):
         return signed_in_principal(token) or self._authentication.authenticate(token)
 
 
+_SLICE_HINT: Final = (
+    "A slice starts part of the application: what it leaves out, a test gives as a MockComponent; what it holds, a "
+    "MockComponent cannot stand in for."
+)
+
+
+@dataclass(frozen=True, slots=True)
+class _Doubles:
+    """What a test puts in place of the application's own: its infrastructure, made here, and its own doubles."""
+
+    services: Mapping[Any, object]
+    explicit: Mapping[Any, object]
+    joining: bool
+
+    def replacing(self) -> dict[Any, object]:
+        """What replaces a component of the container: in a slice, the test's doubles join it instead."""
+        return dict(self.services) if self.joining else {**self.services, **self.explicit}
+
+    def joining_the_container(self) -> list[object]:
+        """The test's doubles as wireup's injectables, in a slice that lacks what they stand in for."""
+        if not self.joining:
+            return []
+        return [_provider(component_type, double) for component_type, double in self.explicit.items()]
+
+
+def _provider(component_type: Any, double: object) -> object:
+    """A provider of `double` as the component of `component_type`, for wireup.
+
+    `wireup.instance` would refuse a mock: `create_autospec` makes `isinstance` true, but the mock's own class is no
+    subclass of the type. A provider announces the type by its return annotation instead.
+    """
+
+    def provide() -> object:
+        return double
+
+    provide.__annotations__ = {"return": component_type}
+    provide.__name__ = provide.__qualname__ = f"provide_{getattr(component_type, '__name__', 'double')}"
+    return wireup.injectable(provide)
+
+
 class _PublishedEventsListener:
     """Hears every event the application publishes, at once, and keeps it in the test's `PublishedEvents`."""
 
@@ -242,9 +298,9 @@ def _recording(events: PublishedEvents) -> object:
 def _test_services(
     context: ApplicationContext, environment: TestEnvironment, overrides: Mapping[Any, object]
 ) -> dict[Any, object]:
-    """The database, the cache and the broker of a test, in place of the ones the configuration names."""
+    """The executor, the database, the cache and the broker of a test, in place of the application's own."""
     sections = context.configuration.sections
-    services: dict[Any, object] = {}
+    services: dict[Any, object] = {TaskExecutor: SyncTaskExecutor()}
     if DatabaseProperties in sections:
         services |= _test_database(context, environment, overrides)
     if CacheProperties in sections and Cache not in overrides:
@@ -302,6 +358,37 @@ def _create_tables(context: ApplicationContext) -> None:
 
     mapping = context.get(EntityMapping)
     mapping.metadata.create_all(context.get(Database).engine, tables=mapping.tables)
+
+
+def _narrowed(application: type, only: ApplicationSlice | None) -> type:
+    """`application` without the modules `only` leaves out; snakeboot's own modules always stay."""
+    if only is None:
+        return application
+    scan = ComponentScan.of(application)
+    package = application_package(application)
+    excluded = [
+        name
+        for name in scan.module_names()
+        if name not in scan.auto_configuration and not _holds(only, import_module(name), package)
+    ]
+    return narrowed_application(application, excluded)
+
+
+def _holds(only: ApplicationSlice, module: ModuleType, application_package_name: str) -> bool:
+    if sections_declared_in(module):  # the configuration reads every table of application.toml
+        return True
+    if isinstance(only, ModuleSlice):
+        return only.holds(module.__name__) or module.__name__.rpartition(".")[0] == application_package_name
+    return any(_is_web(candidate) for candidate in _classes_of(module))  # a WebSlice
+
+
+def _classes_of(module: ModuleType) -> list[type]:
+    return [c for c in vars(module).values() if isinstance(c, type) and c.__module__ == module.__name__]
+
+
+def _is_web(candidate: type) -> bool:
+    markers = (CONTROLLER_MAPPING_ATTRIBUTE, ADVICE_MARKER_ATTRIBUTE, AUTHENTICATION_MARKER_ATTRIBUTE)
+    return any(marker in vars(candidate) for marker in markers)
 
 
 def _base_url_of(server: ServerProperties) -> str:

@@ -1,6 +1,8 @@
+import inspect
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from importlib import import_module
+from types import FunctionType, ModuleType
 from typing import Any, Final, Self, override
 
 import wireup
@@ -123,7 +125,7 @@ class ApplicationContext(ApplicationComponents):
         self.configuration.complete(*(section for module in modules for section in sections_declared_in(module)))
         self._container = wireup.create_sync_container(
             injectables=[
-                *modules,
+                *(self._registrable_part_of(module) for module in modules),
                 *additions,
                 wireup.instance(self, as_type=ApplicationComponents),
                 wireup.instance(self, as_type=ApplicationContext),
@@ -179,3 +181,20 @@ class ApplicationContext(ApplicationComponents):
         # The sections of snakeboot are declared outside the scan: their modules hold their providers.
         sections = (section.__module__ for section in self.configuration.sections)
         return list(dict.fromkeys([*self.scan.module_names(), *sections]))
+
+    def _registrable_part_of(self, module: ModuleType) -> ModuleType:
+        """`module` as wireup reads it: without what it imported from a module the scan leaves out.
+
+        wireup registers every component among a module's members, the ones it imported too. A controller that
+        imports its use case would otherwise bring it into an application, or a test slice, whose scan excludes it.
+        """
+        imported = {name for name, member in vars(module).items() if self._defined_outside_the_scan(member)}
+        if not imported:
+            return module
+        part = ModuleType(module.__name__)
+        part.__dict__.update({name: member for name, member in vars(module).items() if name not in imported})
+        return part
+
+    def _defined_outside_the_scan(self, member: object) -> bool:
+        is_declaration = inspect.isclass(member) or isinstance(member, FunctionType)
+        return is_declaration and self.scan.is_excluded(getattr(member, "__module__", "") or "")

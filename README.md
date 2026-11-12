@@ -51,6 +51,7 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `signed_in_as`, `RecordingTransactionManager`, `declared_classes` | spring-security-test's `jwt()`, spring-test | `snakeboot[testing]` |
 | `PublishedEvents`, `InProcessRabbitTemplate` | Spring's `ApplicationEvents`, Spring Modulith's `PublishedEvents`, Spring AMQP's `TestRabbitTemplate` | `snakeboot[testing]` |
 | `PostgreSQLContainer`, `TestEnvironment` | Testcontainers' `PostgreSQLContainer` with `@ServiceConnection`, Flyway in tests, `ddl-auto=validate`, `@ActiveProfiles` | `snakeboot[testing,testcontainers]` |
+| `@web_test`, `@application_module_test` | `@WebMvcTest`, Spring Modulith's `@ApplicationModuleTest` | `snakeboot[testing]` |
 
 ## Install
 
@@ -533,9 +534,39 @@ def test_an_auction_closes_with_its_winner(
     assert rabbit.sent[0].json() == {"auction_id": auction_id, "recipient": "bob"}
 ```
 
+A slice starts part of the application, as Spring Boot's test slices and Spring Modulith do:
+
+* `@web_test` is `@WebMvcTest`: the modules that declare a `@rest_controller`, a `@rest_controller_advice` or the
+  API's `BearerAuthentication`, and nothing else; a controller's use cases are `MockComponent`s. Its `@roles_allowed`,
+  its advices and `signed_in_as` work as in the whole application.
+* `@application_module_test("auction_house.invoicing")` is `@ApplicationModuleTest`: those packages and the modules
+  right in the application's package (its root and its tokens), without the other bounded contexts; whatever they are
+  used for is a `MockComponent`.
+
+```python
+@web_test
+class TestAuctionRestController:
+    client: Autowired[RestClient]
+    place_bid: MockComponent[PlaceBidUseCase]
+
+    def test_a_bid_that_is_too_low_answers_409(self) -> None:
+        when(self.place_bid.execute).then_raise(BidTooLowError("The highest bid is 150."))
+
+        response = self.client.post(f"/api/auctions/{AUCTION}/bids", json={"amount": 120}, headers=signed_in_as(...))
+
+        assert (response.status_code, response.json()["code"]) == (409, "bid_too_low")
+```
+
+A dependency that nobody gave stops the test and names it, as Spring's context does that does not load: `Parameter
+'open_auction' of AuctionRestController has an unknown dependency on OpenAuctionUseCase`. A module that declares a
+section stays in every slice, since the configuration reads every table: give sections a module of their own. And
+what a slice leaves out stays out, even where a module it holds imports it: wireup registers a module's imports too,
+so snakeboot leaves out every member defined in a module the scan excludes.
+
 Underneath, `TestApplication` starts the application as it runs, from its `application.toml`, like `@SpringBootTest`
-with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace components with doubles, and
-`environment=TestEnvironment(profile=..., properties=..., database=...)` says where it runs. `client()` calls the REST
+with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace components with doubles,
+`environment=TestEnvironment(profile=..., properties=..., database=...)` says where it runs and `only=WebSlice()` or
+`only=ModuleSlice(("...",))` how much of it. `client()` calls the REST
 API in the same process, like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may
 use it directly:
 

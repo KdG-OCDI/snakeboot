@@ -10,7 +10,7 @@ underneath has started. Once it has, `classes_marked` and `methods_marked` find 
 like Spring's `MethodIntrospector`.
 """
 
-from snakeboot.component_scan.application_root import application_package, application_root
+from snakeboot.component_scan.application_root import application_package, application_root, narrowed_application
 from snakeboot.component_scan.component_scan import (
     DEFAULT_EXCLUDE,
     SNAKEBOOT_AUTO_CONFIGURATION,
@@ -27,4 +27,5 @@ __all__ = [
     "MarkedMethod",
     "application_package",
     "application_root",
+    "narrowed_application",
 ]

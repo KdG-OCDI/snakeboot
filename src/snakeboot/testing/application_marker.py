@@ -7,6 +7,7 @@ from typing import Any, Final, cast, get_type_hints, overload
 
 from snakeboot.testing.environment import PostgreSQLContainer, TestEnvironment
 from snakeboot.testing.injection import InjectionPoint, injection_points
+from snakeboot.testing.slices import ApplicationSlice, ModuleSlice, WebSlice
 
 APPLICATION_TEST_FIXTURE: Final = "snakeboot_application_test"
 """The pytest fixture that starts the application of an `@application_test`: snakeboot's pytest plugin provides it."""
@@ -17,14 +18,16 @@ _PARAMETERS: Final = "__snakeboot_injected_parameters__"
 
 @dataclass(frozen=True, slots=True)
 class ApplicationTest:
-    """How an `@application_test` starts its application: which one, and in which `TestEnvironment`.
+    """How an `@application_test` starts its application: which one, in which `TestEnvironment`, and how much of it.
 
     Without `application`, the test starts the one class with `@application_root` in the project's source, as
-    Spring Boot finds the `@SpringBootConfiguration`.
+    Spring Boot finds the `@SpringBootConfiguration`. Without `only`, it starts the whole application; with a slice,
+    only that part (`@web_test`, `@application_module_test`).
     """
 
     application: type | None = None
     environment: TestEnvironment = field(default_factory=TestEnvironment)
+    only: ApplicationSlice | None = None
 
     def __call__[T](self, test: T) -> T:
         """Marks a test function, or every test of a test class."""
@@ -78,6 +81,69 @@ def application_test(
     properties = MappingProxyType(dict(properties or {}))
     marker = ApplicationTest(application, TestEnvironment(profile, properties, database))
     return marker if test is None else marker(test)
+
+
+@overload
+def web_test[T](test: T, /) -> T: ...
+
+
+@overload
+def web_test(
+    *, application: type | None = None, profile: str | None = None, properties: Mapping[str, object] | None = None
+) -> ApplicationTest: ...
+
+
+def web_test(
+    test: object = None,
+    /,
+    *,
+    application: type | None = None,
+    profile: str | None = None,
+    properties: Mapping[str, object] | None = None,
+) -> object:
+    """A test of the REST layer alone, like `@WebMvcTest`: controllers, advices, the authentication and sections.
+
+        @web_test
+        class TestAuctionRestController:
+            client: Autowired[RestClient]
+            place_bid: MockComponent[PlaceBidUseCase]     # @MockitoBean: the use cases are left out
+
+            def test_a_bid_that_is_too_low_answers_409(self) -> None:
+                when(self.place_bid.execute).then_raise(BidTooLowError("..."))
+                ...
+
+    Every other module of the application is left out (`WebSlice`), so a controller's use cases and ports are given
+    as a `MockComponent`; one that is missing stops the test and names it. The calls carry `signed_in_as`, and the
+    controllers' own `@roles_allowed` and advices answer, as in the whole application.
+    """
+    properties = MappingProxyType(dict(properties or {}))
+    marker = ApplicationTest(application, TestEnvironment(profile, properties), only=WebSlice())
+    return marker if test is None else marker(test)
+
+
+def application_module_test(
+    *packages: str,
+    application: type | None = None,
+    profile: str | None = None,
+    properties: Mapping[str, object] | None = None,
+    database: PostgreSQLContainer | None = None,
+) -> ApplicationTest:
+    """A test of bounded contexts on their own, like Spring Modulith's `@ApplicationModuleTest`.
+
+        @application_module_test("auction_house.invoicing")
+        class TestInvoicing:
+            events: Autowired[ApplicationEventPublisher]
+            invoices: Autowired[InvoiceRepositoryPort]
+
+    Only the modules of `packages`, of the application's package itself and those that declare a section join the
+    application (`ModuleSlice`): the other contexts are left out, so whatever these use of them is given as a
+    `MockComponent`, and a dependency nobody gave stops the test and names it.
+    """
+    if not packages:
+        raise TypeError("@application_module_test names the packages of the contexts it starts.")
+    properties = MappingProxyType(dict(properties or {}))
+    environment = TestEnvironment(profile, properties, database)
+    return ApplicationTest(application, environment, only=ModuleSlice(packages))
 
 
 def application_test_of(test: object) -> ApplicationTest | None:

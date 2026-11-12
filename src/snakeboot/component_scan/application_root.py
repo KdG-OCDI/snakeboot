@@ -1,6 +1,7 @@
 import sys
-from collections.abc import Callable
-from typing import overload
+from collections.abc import Callable, Iterable
+from dataclasses import replace
+from typing import Final, overload
 
 from snakeboot.component_scan.component_scan import (
     APPLICATION_ROOT_ATTRIBUTE,
@@ -8,6 +9,8 @@ from snakeboot.component_scan.component_scan import (
     ComponentScan,
     InvalidApplicationRootError,
 )
+
+_CLASS_INTERNALS: Final = frozenset({"__dict__", "__weakref__"})
 
 
 @overload
@@ -65,3 +68,16 @@ def application_package(application_class: type) -> str:
             "an application root lives in the top package of the application."
         )
     return package
+
+
+def narrowed_application(application_class: type, excluded_modules: Iterable[str]) -> type:
+    """Returns `application_class` without `excluded_modules`, as a test slice starts part of an application.
+
+    The result is a subclass with the declarations of the application (its package, its configuration, its OpenAPI
+    definition) and a component scan of its own: the same packages, with `excluded_modules` left out. Whatever asks
+    the scan, the container, the REST API and the scheduler alike, sees only the rest.
+    """
+    scan = ComponentScan.of(application_class)
+    namespace = {name: value for name, value in vars(application_class).items() if name not in _CLASS_INTERNALS}
+    namespace[APPLICATION_ROOT_ATTRIBUTE] = replace(scan, exclude=(*scan.exclude, *excluded_modules))
+    return type(application_class.__name__, (application_class,), namespace)
