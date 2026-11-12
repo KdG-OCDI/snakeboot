@@ -78,6 +78,7 @@ dev = [
     "redis>=8.1.0",
     "ruff>=0.17.1",
     "sqlalchemy>=2.1.8",
+    "testcontainers>=4.15",
     "uvicorn>=0.54.0",
 ]
 
