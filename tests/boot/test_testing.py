@@ -8,7 +8,7 @@ import pytest
 
 from snakeboot.boot.testing import RestClient, RestResponse, TestApplication
 from snakeboot.configuration import ServerProperties
-from snakeboot.testing import verify
+from snakeboot.testing import TestEnvironment, verify
 from tests.application.sample_service.games.game_record import GameRecords
 from tests.application.sample_service.games.game_rest_controller import Announcer
 from tests.application.sample_service.sample_service_application import SampleServiceApplication
@@ -126,5 +126,7 @@ def test_a_spy_does_what_the_component_does_and_records_its_calls(application: T
 
 
 def test_properties_reach_the_configuration() -> None:
-    with TestApplication.start(SampleServiceApplication, properties={"server.allowed_hosts": ["games.example"]}) as app:
+    environment = TestEnvironment(properties={"server.allowed_hosts": ["games.example"]})
+
+    with TestApplication.start(SampleServiceApplication, environment=environment) as app:
         assert app.configuration.get(ServerProperties).allowed_hosts == ("games.example",)

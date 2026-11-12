@@ -95,10 +95,7 @@ class RabbitListenerContainers(Lifecycle, component=False):
 
     @override
     def start(self) -> None:
-        endpoints = [
-            self._endpoint_of(marked)
-            for marked in self._components.methods_marked(RABBIT_LISTENER_MAPPING_ATTRIBUTE, RabbitListenerMapping)
-        ]
+        endpoints = rabbit_listener_endpoints(self._components, self._task_decorator)
         if not self._auto_startup:
             return
         self._stopping.clear()
@@ -113,30 +110,47 @@ class RabbitListenerContainers(Lifecycle, component=False):
             thread.join(timeout=self._timing.shutdown_seconds)
         self._threads = []
 
-    def _endpoint_of(self, marked: MarkedMethod[RabbitListenerMapping]) -> RabbitListenerEndpoint:
-        method = marked.method
-        if inspect.iscoroutinefunction(method):
-            raise InvalidRabbitListenerError(f"{marked.name} is async; listeners are synchronous.")
-        parameters = list(inspect.signature(method).parameters)
-        if len(parameters) != _SELF_AND_MESSAGE:
-            raise InvalidRabbitListenerError(f"{marked.name} must take exactly one argument: the message.")
-        read = body_reader(get_type_hints(method).get(parameters[1], Any), marked.name)
-        try:
-            component: object = self._components.get(marked.owner)
-        except LookupError as error:
-            raise InvalidRabbitListenerError(
-                f"{marked.name} listens, but {marked.owner.__qualname__} is no component: add @injectable."
-            ) from error
-        handle: Callable[[object], None] = getattr(component, method.__name__)
-
-        def receive(body: bytes) -> None:
-            self._task_decorator.decorate(partial(handle, read(body)))()
-
-        return RabbitListenerEndpoint(marked.name, marked.mapping, receive)
-
     def _thread_for(self, endpoint: RabbitListenerEndpoint) -> threading.Thread:
         consumer = _Consumer(endpoint, self._connection_factory, timing=self._timing, stopping=self._stopping)
         return threading.Thread(target=consumer.run, name=f"snakeboot-rabbit-{endpoint.mapping.queue}", daemon=True)
+
+
+def rabbit_listener_endpoints(
+    components: ApplicationComponents, task_decorator: TaskDecorator
+) -> list[RabbitListenerEndpoint]:
+    """Returns every `@rabbit_listener` method of the application, bound to its component and its body reader.
+
+    A method that cannot receive as declared stops here: async, or not taking exactly one message, or of a class that
+    is no component. Each message is handled through `task_decorator`, between fresh connections to the database.
+    """
+    return [
+        _endpoint_of(marked, components, task_decorator)
+        for marked in components.methods_marked(RABBIT_LISTENER_MAPPING_ATTRIBUTE, RabbitListenerMapping)
+    ]
+
+
+def _endpoint_of(
+    marked: MarkedMethod[RabbitListenerMapping], components: ApplicationComponents, task_decorator: TaskDecorator
+) -> RabbitListenerEndpoint:
+    method = marked.method
+    if inspect.iscoroutinefunction(method):
+        raise InvalidRabbitListenerError(f"{marked.name} is async; listeners are synchronous.")
+    parameters = list(inspect.signature(method).parameters)
+    if len(parameters) != _SELF_AND_MESSAGE:
+        raise InvalidRabbitListenerError(f"{marked.name} must take exactly one argument: the message.")
+    read = body_reader(get_type_hints(method).get(parameters[1], Any), marked.name)
+    try:
+        component: object = components.get(marked.owner)
+    except LookupError as error:
+        raise InvalidRabbitListenerError(
+            f"{marked.name} listens, but {marked.owner.__qualname__} is no component: add @injectable."
+        ) from error
+    handle: Callable[[object], None] = getattr(component, method.__name__)
+
+    def receive(body: bytes) -> None:
+        task_decorator.decorate(partial(handle, read(body)))()
+
+    return RabbitListenerEndpoint(marked.name, marked.mapping, receive)
 
 
 class _Consumer:

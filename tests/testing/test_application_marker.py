@@ -69,7 +69,12 @@ def test_a_class_has_its_fields_filled_and_the_parameters_of_its_methods() -> No
     assert parameters_of(TestNotes.test_without_injection) == ["self", "tmp_path"]
     marker = application_test_of(TestNotes)
     assert marker is not None
-    assert (marker.application, marker.profile, dict(marker.properties)) == (None, "test", {"notes.max_length": 3})
+    environment = marker.environment
+    assert (marker.application, environment.profile, dict(environment.properties)) == (
+        None,
+        "test",
+        {"notes.max_length": 3},
+    )
 
 
 def test_only_a_function_or_a_class_is_a_test() -> None:

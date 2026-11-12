@@ -18,6 +18,7 @@ listeners are a `Lifecycle` component: they consume while an ASGI server serves 
 `run_lifecycle` runs it, and `[rabbitmq.listener] auto_startup = false` keeps a process from consuming.
 """
 
+from snakeboot.rabbitmq.in_process_rabbit_template import InProcessRabbitTemplate, RefusedMessage, SentMessage
 from snakeboot.rabbitmq.message_conversion import MessageConversionError
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener import (
@@ -31,6 +32,7 @@ from snakeboot.rabbitmq.rabbit_template import AmqpPublishError, RabbitTemplate
 
 __all__ = [
     "AmqpPublishError",
+    "InProcessRabbitTemplate",
     "InvalidRabbitListenerError",
     "ListenerTiming",
     "MessageConversionError",
@@ -38,6 +40,8 @@ __all__ = [
     "RabbitListenerContainers",
     "RabbitListenerMapping",
     "RabbitTemplate",
+    "RefusedMessage",
     "RejectAndDontRequeueError",
+    "SentMessage",
     "rabbit_listener",
 ]

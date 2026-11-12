@@ -5,6 +5,7 @@ from functools import wraps
 from types import MappingProxyType
 from typing import Any, Final, cast, get_type_hints, overload
 
+from snakeboot.testing.environment import PostgreSQLContainer, TestEnvironment
 from snakeboot.testing.injection import InjectionPoint, injection_points
 
 APPLICATION_TEST_FIXTURE: Final = "snakeboot_application_test"
@@ -16,15 +17,14 @@ _PARAMETERS: Final = "__snakeboot_injected_parameters__"
 
 @dataclass(frozen=True, slots=True)
 class ApplicationTest:
-    """How an `@application_test` starts its application: which one, in which profile, with which properties.
+    """How an `@application_test` starts its application: which one, and in which `TestEnvironment`.
 
     Without `application`, the test starts the one class with `@application_root` in the project's source, as
     Spring Boot finds the `@SpringBootConfiguration`.
     """
 
     application: type | None = None
-    profile: str | None = None
-    properties: Mapping[str, object] = field(default_factory=lambda: MappingProxyType({}))
+    environment: TestEnvironment = field(default_factory=TestEnvironment)
 
     def __call__[T](self, test: T) -> T:
         """Marks a test function, or every test of a test class."""
@@ -41,7 +41,11 @@ def application_test[T](test: T, /) -> T: ...
 
 @overload
 def application_test(
-    *, application: type | None = None, profile: str | None = None, properties: Mapping[str, object] | None = None
+    *,
+    application: type | None = None,
+    profile: str | None = None,
+    properties: Mapping[str, object] | None = None,
+    database: PostgreSQLContainer | None = None,
 ) -> ApplicationTest: ...
 
 
@@ -52,6 +56,7 @@ def application_test(
     application: type | None = None,
     profile: str | None = None,
     properties: Mapping[str, object] | None = None,
+    database: PostgreSQLContainer | None = None,
 ) -> object:
     """A test of the whole application, like `@SpringBootTest`: snakeboot starts it anew for every test it marks.
 
@@ -67,8 +72,11 @@ def application_test(
     and spies of the test. `@application_test(application=..., profile="test", properties={...})` names the
     application, like `@SpringBootTest(classes = ...)`, activates a profile, like `@ActiveProfiles`, and sets
     properties that win over every other source, like `@SpringBootTest(properties = ...)`.
+    `@application_test(database=PostgreSQLContainer())` runs the test on PostgreSQL, built by the application's own
+    migrations, instead of SQLite in memory.
     """
-    marker = ApplicationTest(application, profile, MappingProxyType(dict(properties or {})))
+    properties = MappingProxyType(dict(properties or {}))
+    marker = ApplicationTest(application, TestEnvironment(profile, properties, database))
     return marker if test is None else marker(test)
 
 

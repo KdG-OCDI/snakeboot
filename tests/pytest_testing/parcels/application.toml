@@ -1,0 +1,26 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+workers = 1
+debug = false
+allowed_hosts = ["*"]
+log_level = "WARNING"
+
+# A PostgreSQL and a RabbitMQ that nobody runs: a test gets SQLite in memory, or a PostgreSQL in a container, and a
+# RabbitTemplate that hands its messages to the listeners of the application itself.
+[database]
+host = "localhost"
+port = 55432
+name = "parcels"
+user = "parcels"
+password = "parcels"
+
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "parcels"
+password = "parcels"
+virtual_host = "/"
+
+[rabbitmq.listener]
+auto_startup = false

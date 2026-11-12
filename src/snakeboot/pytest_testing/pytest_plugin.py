@@ -42,8 +42,7 @@ def application_test_fixture(request: pytest.FixtureRequest) -> Iterator[Mapping
     with TestApplication.start(
         _application_of(marker, sources),
         mocks,
-        profile=marker.profile,
-        properties=marker.properties,
+        environment=marker.environment,
         test_components={replaced: _built(component) for replaced, component in sources.test_components().items()},
     ) as started:
         for point in points:

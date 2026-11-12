@@ -25,7 +25,9 @@ snakeboot's pytest plugin, which pytest loads by itself, starts the application 
 from snakeboot.testing.application_marker import ApplicationTest, application_test
 from snakeboot.testing.component_replacements import InvalidTestComponentError, test_component
 from snakeboot.testing.declared_classes import declared_classes, qualified_names
+from snakeboot.testing.environment import PostgreSQLContainer, TestEnvironment
 from snakeboot.testing.injection import Autowired, MockComponent, SpyComponent
+from snakeboot.testing.published_events import PublishedEvents
 from snakeboot.testing.recording_transaction_manager import RecordingTransactionManager
 from snakeboot.testing.signed_in_tokens import signed_in_as
 from snakeboot.testing.source_scan import ApplicationNotFoundError
@@ -37,9 +39,12 @@ __all__ = [
     "Autowired",
     "InvalidTestComponentError",
     "MockComponent",
+    "PostgreSQLContainer",
+    "PublishedEvents",
     "RecordingTransactionManager",
     "SpyComponent",
     "Stubbing",
+    "TestEnvironment",
     "Verification",
     "application_test",
     "declared_classes",

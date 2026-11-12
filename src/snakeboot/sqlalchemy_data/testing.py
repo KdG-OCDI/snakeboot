@@ -5,9 +5,17 @@ from sqlalchemy import StaticPool, create_engine
 from sqlalchemy.pool import ConnectionPoolEntry
 
 from snakeboot.sqlalchemy_data.database import Database
+from snakeboot.sqlalchemy_data.postgresql_container import ContainerUnavailableError, postgresql_database
 from snakeboot.sqlalchemy_data.sqlite import SQLITE_DATETIME, open_transactions_with_sqlalchemy
 
-__all__ = ["HOLD_SECONDS", "SQLITE_DATETIME", "OneThreadAtATimePool", "in_memory_database"]
+__all__ = [
+    "HOLD_SECONDS",
+    "SQLITE_DATETIME",
+    "ContainerUnavailableError",
+    "OneThreadAtATimePool",
+    "in_memory_database",
+    "postgresql_database",
+]
 
 HOLD_SECONDS: Final = 10
 """How long a thread waits for the connection another holds, before the test fails instead of hanging."""

@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Mapping, Sequence
 from dataclasses import replace
 from importlib import import_module
 from typing import Any, Final, Self, override
@@ -111,18 +111,20 @@ class ApplicationContext(ApplicationComponents):
         """Tells whether `refresh` built the container."""
         return self._container is not None
 
-    def refresh(self, overrides: Mapping[Any, object] | None = None) -> None:
+    def refresh(self, overrides: Mapping[Any, object] | None = None, *, additions: Sequence[object] = ()) -> None:
         """Imports the modules, reads every section they declare, builds the container and installs the transactions.
 
         `overrides` replace components before anything is built, as a test replaces a port with a double or the
-        database with one in memory. A missing value, an unknown table or a dependency the container cannot satisfy
-        stops the start here.
+        database with one in memory. `additions` are wireup's injectables that join the container besides the
+        modules, as a test adds a listener that records every event. A missing value, an unknown table or a
+        dependency the container cannot satisfy stops the start here.
         """
         modules = [import_module(name) for name in self._module_names()]
         self.configuration.complete(*(section for module in modules for section in sections_declared_in(module)))
         self._container = wireup.create_sync_container(
             injectables=[
                 *modules,
+                *additions,
                 wireup.instance(self, as_type=ApplicationComponents),
                 wireup.instance(self, as_type=ApplicationContext),
             ],

@@ -24,11 +24,25 @@ Tests in Spring Boot's style, without conftest.py, fixtures or settings:
   application of a test accepts next to its own tokens; its own `@roles_allowed` decide.
 - `snakeboot.pytest_testing`, the binding of `testing` to pytest: pytest loads its plugin through the entry point
   `pytest11`. `snakeboot[testing]` brings pytest.
-- `TestApplication.start(..., profile=..., properties=..., test_components=...)`, `TestApplication.spy(T)`;
-  `TestApplication.get` finds a double by its own type too; with `[cache]` a test gets an `InMemoryCache`; the API
-  accepts the tokens of `signed_in_as`.
+- `@application_test(database=PostgreSQLContainer())`, like Testcontainers' `PostgreSQLContainer` with
+  `@ServiceConnection`: the test runs on PostgreSQL in Docker. The application's own migrations build the schema
+  once per process, in a template database that every test copies; first the migrated schema is compared with the
+  entities, like `ddl-auto=validate`, and what `make_migration` would still write stops the tests, with that SQL.
+  `snakeboot[testcontainers]` brings Testcontainers.
+- `Autowired[PublishedEvents]`, like Spring's `ApplicationEvents` and Spring Modulith's `PublishedEvents`: every event
+  the application published during the test, `of_type(AuctionClosed)`.
+- With `[rabbitmq]`, a test's `RabbitTemplate` is an `InProcessRabbitTemplate`, like Spring AMQP's `TestRabbitTemplate`:
+  it keeps every message in `sent` and hands it, as the same JSON, to the application's own `@rabbit_listener` methods
+  whose queue a topic exchange routes it to, after the sender's commit; what a listener refuses lands in `refused`.
+- `TestApplication.start(..., environment=TestEnvironment(profile=..., properties=..., database=...),
+  test_components=...)`, `TestApplication.spy(T)`, `TestApplication.published_events`; `TestApplication.get` finds a
+  double by its own type too; with `[cache]` a test gets an `InMemoryCache`; the API accepts the tokens of
+  `signed_in_as`; `close()` drops the PostgreSQL copy of the test.
 - `begin_configuration(..., profile=..., properties=...)` and `ApplicationContext.of(..., profile=..., properties=...)`;
+  `ApplicationContext.refresh(..., additions=...)` adds wireup's injectables besides the modules;
   `ApplicationContext.replace_component` replaces a component of the built container, and names what it lacks.
+- `snakeboot.rabbitmq.rabbit_listener_endpoints` finds the `@rabbit_listener` methods of an application, for the
+  listener containers and the in-process template alike.
 
 ## 0.11.1
 

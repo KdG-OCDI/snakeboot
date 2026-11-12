@@ -49,12 +49,15 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `@application_test`, `Autowired`, `@test_component`, `TestApplication` | `@SpringBootTest`, `@Autowired`, `@TestComponent` with `@Primary`, `@AutoConfigureTestDatabase`, `TestRestTemplate` | `snakeboot[testing]` |
 | `MockComponent`, `SpyComponent`, `when`, `verify` | `@MockitoBean`, `@MockitoSpyBean`, Mockito's `when` and `verify` | `snakeboot[testing]` |
 | `signed_in_as`, `RecordingTransactionManager`, `declared_classes` | spring-security-test's `jwt()`, spring-test | `snakeboot[testing]` |
+| `PublishedEvents`, `InProcessRabbitTemplate` | Spring's `ApplicationEvents`, Spring Modulith's `PublishedEvents`, Spring AMQP's `TestRabbitTemplate` | `snakeboot[testing]` |
+| `PostgreSQLContainer`, `TestEnvironment` | Testcontainers' `PostgreSQLContainer` with `@ServiceConnection`, Flyway in tests, `ddl-auto=validate`, `@ActiveProfiles` | `snakeboot[testing,testcontainers]` |
 
 ## Install
 
 ```bash
 uv add "snakeboot[configuration,web,data]"
 uv add "snakeboot[configuration,web,data,rabbitmq,oauth2]"   # with RabbitMQ and Keycloak's tokens
+uv add --dev "snakeboot[testing,testcontainers]"            # @application_test, on PostgreSQL in Docker too
 ```
 
 ## A tour
@@ -500,12 +503,41 @@ so nothing needs to be emptied between tests, where Spring keeps one context.
 * An unknown type, a test component without a constructor without arguments or two test components for one component
   stop the test before it runs.
 
+The infrastructure of a test is snakeboot's own, so nothing outside the test runs:
+
+* **The database** is a fresh SQLite in memory whose tables come from the entities. What SQLite cannot show (a
+  `Vector`'s similarity search, `@lock`, PostgreSQL's own SQL in an `@query`, a constraint only the migrations have)
+  runs on PostgreSQL, in a container, like Testcontainers' `PostgreSQLContainer` with `@ServiceConnection`:
+  `@application_test(database=PostgreSQLContainer("pgvector/pgvector:pg17"))`. The application's own migrations
+  build the schema, once per process, and every test gets a copy of it (`CREATE DATABASE ... TEMPLATE`, a tenth of a
+  second). First the migrated schema is compared with the entities, like Hibernate's `ddl-auto=validate`: a change
+  `make_migration` would still write stops the tests, with that SQL. It needs Docker and `snakeboot[testcontainers]`.
+* **The events**: `Autowired[PublishedEvents]` holds every event the application published during the test, like
+  Spring's `ApplicationEvents` and Spring Modulith's `PublishedEvents`: `[closed] = events.of_type(AuctionClosed)`.
+* **The broker**: with `[rabbitmq]`, the `RabbitTemplate` is an `InProcessRabbitTemplate`, like Spring AMQP's
+  `TestRabbitTemplate`. It keeps every message in `sent` and hands it, as the same JSON, to the application's own
+  `@rabbit_listener` methods whose queue a topic exchange would route it to, once the sender's transaction committed;
+  what a listener refuses lands in `refused`, and never fails the sender.
+* **The cache** is an `InMemoryCache`; the `@application_module_listener` methods run on the caller's thread, so what
+  they did is there when the call that published returns.
+
+```python
+@application_test(database=PostgreSQLContainer())
+def test_an_auction_closes_with_its_winner(
+    client: Autowired[RestClient], events: Autowired[PublishedEvents], rabbit: Autowired[InProcessRabbitTemplate]
+) -> None:
+    close(client, auction_id)
+
+    [closed] = events.of_type(AuctionClosed)
+    assert closed.winner == "bob"
+    assert rabbit.sent[0].json() == {"auction_id": auction_id, "recipient": "bob"}
+```
+
 Underneath, `TestApplication` starts the application as it runs, from its `application.toml`, like `@SpringBootTest`
-with `@AutoConfigureTestDatabase`: `overrides` replace components with doubles, the database is a fresh SQLite in
-memory whose tables come from the entities, the cache an `InMemoryCache`, and the `@application_module_listener`
-methods run on the caller's thread, so what they did is there when the call returns. `client()` calls the REST API in
-the same process, like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may use it
-directly:
+with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace components with doubles, and
+`environment=TestEnvironment(profile=..., properties=..., database=...)` says where it runs. `client()` calls the REST
+API in the same process, like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may
+use it directly:
 
 ```python
 def test_a_started_game_can_be_read() -> None:

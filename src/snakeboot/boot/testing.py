@@ -1,17 +1,27 @@
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from types import TracebackType
 from typing import TYPE_CHECKING, Any, Self, cast, override
 from unittest.mock import Mock
 
+import wireup
+
 from snakeboot.application import ApplicationContext
 from snakeboot.boot.entry_points import CONDITIONAL_MODULES, web_api
 from snakeboot.cache import Cache, InMemoryCache
-from snakeboot.configuration import CacheProperties, Configuration, DatabaseProperties, ServerProperties
-from snakeboot.events import SyncTaskExecutor, TaskExecutor
+from snakeboot.configuration import (
+    CacheProperties,
+    Configuration,
+    DatabaseProperties,
+    RabbitProperties,
+    ServerProperties,
+)
+from snakeboot.events import ApplicationEventListener, SyncTaskExecutor, TaskExecutor, event_listener
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 from snakeboot.lifecycle.lifecycle_asgi_application import LifecycleAsgiApplication
 from snakeboot.rest import BearerAuthentication
 from snakeboot.security import Principal
+from snakeboot.testing.environment import TestEnvironment
+from snakeboot.testing.published_events import PublishedEvents
 from snakeboot.testing.signed_in_tokens import signed_in_principal
 
 if TYPE_CHECKING:
@@ -34,20 +44,31 @@ class TestApplication:
             assert app.get(GameRecords).count() == 0               # any component of the container
 
     The application starts as it does for real, from its application.toml and the active profile, with these
-    differences: `overrides` replace components with doubles; with `[database]` the database is a fresh one in
-    memory whose tables come from the entities, as Spring Boot's tests create the schema from JPA's metamodel; with
-    `[cache]` the cache is an `InMemoryCache`; the `@application_module_listener` methods run on the caller's thread,
-    so what they did is there when the call that published returns; and the API accepts the tokens of
-    `signed_in_as` next to its own. A test of the SQL migrations themselves runs `migrate` against a real database.
+    differences: `overrides` replace components with doubles; with `[database]` the database is a fresh SQLite in
+    memory whose tables come from the entities, as Spring Boot's tests create the schema from JPA's metamodel, or a
+    copy of a PostgreSQL that the application's migrations built (`TestEnvironment.database`); with `[cache]` the
+    cache is an `InMemoryCache`; with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own
+    `@rabbit_listener` methods, without a broker (`InProcessRabbitTemplate`); the `@application_module_listener`
+    methods run on the caller's thread, so what they did is there when the call that published returns; every event
+    is kept in `published_events`; and the API accepts the tokens of `signed_in_as` next to its own.
 
     `snakeboot.testing.application_test` starts it for a test and injects what the test asks for.
     """
 
     __test__ = False  # pytest: a class named Test... that is no test class
 
-    def __init__(self, context: ApplicationContext, replacements: Mapping[Any, object] | None = None) -> None:
+    def __init__(
+        self,
+        context: ApplicationContext,
+        replacements: Mapping[Any, object] | None = None,
+        *,
+        published_events: PublishedEvents | None = None,
+        owned: Sequence[Any] = (),
+    ) -> None:
         self._context = context
         self._replacements = dict(replacements or {})
+        self._published_events = published_events if published_events is not None else PublishedEvents()
+        self._owned = list(owned)
 
     @classmethod
     def start(
@@ -55,39 +76,46 @@ class TestApplication:
         application: type,
         overrides: Mapping[Any, object] | None = None,
         *,
-        profile: str | None = None,
-        properties: Mapping[str, object] | None = None,
+        environment: TestEnvironment | None = None,
         test_components: Mapping[Any, object] | None = None,
     ) -> Self:
-        """Starts `application` with `overrides` and, when it has `[database]`, a database in memory.
+        """Starts `application` with `overrides`, in `environment`: by default without a profile and in memory.
 
-        `profile` and `properties` win over the files and the environment, like `@ActiveProfiles` and
-        `@SpringBootTest(properties = ...)`: `properties={"scheduling.auto_startup": False}`. `test_components`
-        replace the components the application has, unless `overrides` replaces the same; for an application without
-        one of them, it does nothing.
+        `test_components` replace the components the application has, unless `overrides` replaces the same; for an
+        application without one of them, it does nothing.
         """
-        context = ApplicationContext.of(application, CONDITIONAL_MODULES, profile=profile, properties=properties)
+        environment = environment or TestEnvironment()
+        context = ApplicationContext.of(
+            application, CONDITIONAL_MODULES, profile=environment.profile, properties=environment.properties
+        )
         explicit = dict(overrides or {})
-        replacements = {TaskExecutor: SyncTaskExecutor(), **_in_memory_services(context.configuration, explicit)}
-        replacements |= explicit
-        context.refresh(replacements)
-        replacements |= _replaced_where_present(context, test_components or {}, replacements)
-        if DatabaseProperties in context.configuration.sections:
-            _create_tables(context)
-        started = cls(context, replacements)
-        started._accept_signed_in_tokens()
-        return started
+        services = _test_services(context, environment, explicit)
+        try:
+            return cls._started(
+                context, environment=environment, services=services, explicit=explicit, test_components=test_components
+            )
+        except BaseException:
+            _close(services.values())
+            raise
 
     @property
     def configuration(self) -> Configuration:
         """What the application read: its sections, by class."""
         return self._context.configuration
 
+    @property
+    def published_events(self) -> PublishedEvents:
+        """Every event the application published since it started, like Spring's `ApplicationEvents`."""
+        return self._published_events
+
     def get[T](self, component_type: Callable[..., T]) -> T:
         """Returns the component of `component_type`, a double that replaced it included.
 
         A double is also found by its own type: `get(FixedClock)` returns the `FixedClock` that replaced the clock.
+        `get(PublishedEvents)` returns `published_events`.
         """
+        if component_type is PublishedEvents:
+            return cast("T", self._published_events)
         try:
             return self._context.get(component_type)
         except LookupError:
@@ -126,8 +154,11 @@ class TestApplication:
         return TestClient(LifecycleAsgiApplication(api, lifecycle=lifecycle), base_url=_base_url_of(server))
 
     def close(self) -> None:
-        """Closes the container and what it holds."""
-        self._context.close()
+        """Closes the container and what it holds, and the database of the test: a PostgreSQL copy is dropped."""
+        try:
+            self._context.close()
+        finally:
+            _close(self._owned)
 
     def __enter__(self) -> Self:
         """Returns the started application, which the end of the `with` block closes."""
@@ -138,6 +169,27 @@ class TestApplication:
     ) -> None:
         """Closes the application."""
         self.close()
+
+    @classmethod
+    def _started(
+        cls,
+        context: ApplicationContext,
+        *,
+        environment: TestEnvironment,
+        services: Mapping[Any, object],
+        explicit: Mapping[Any, object],
+        test_components: Mapping[Any, object] | None,
+    ) -> Self:
+        events = PublishedEvents()
+        replacements: dict[Any, object] = {TaskExecutor: SyncTaskExecutor(), **services, **explicit}
+        context.refresh(replacements, additions=[_recording(events)])
+        replacements |= _replaced_where_present(context, test_components or {}, replacements)
+        if DatabaseProperties in context.configuration.sections and environment.database is None:
+            _create_tables(context)
+        # What the test made for itself, it closes: the database of a test drops its PostgreSQL copy.
+        started = cls(context, replacements, published_events=events, owned=list(services.values()))
+        started._accept_signed_in_tokens()
+        return started
 
     def _double_of(self, component_type: object) -> object | None:
         if not isinstance(component_type, type):
@@ -170,13 +222,64 @@ class _SignedInTokens(BearerAuthentication, component=False):
         return signed_in_principal(token) or self._authentication.authenticate(token)
 
 
-def _in_memory_services(configuration: Configuration, overrides: Mapping[Any, object]) -> dict[Any, object]:
+class _PublishedEventsListener:
+    """Hears every event the application publishes, at once, and keeps it in the test's `PublishedEvents`."""
+
+    def __init__(self, events: PublishedEvents) -> None:
+        self._events = events
+
+    @event_listener(object)
+    def record(self, event: object) -> None:
+        """Keeps `event`."""
+        self._events.record(event)
+
+
+def _recording(events: PublishedEvents) -> object:
+    listener = _PublishedEventsListener(events)
+    return wireup.instance(listener, as_type=ApplicationEventListener, qualifier="snakeboot.testing.PublishedEvents")
+
+
+def _test_services(
+    context: ApplicationContext, environment: TestEnvironment, overrides: Mapping[Any, object]
+) -> dict[Any, object]:
+    """The database, the cache and the broker of a test, in place of the ones the configuration names."""
+    sections = context.configuration.sections
     services: dict[Any, object] = {}
-    if DatabaseProperties in configuration.sections:
-        services |= _in_memory_database(overrides)
-    if CacheProperties in configuration.sections and Cache not in overrides:
+    if DatabaseProperties in sections:
+        services |= _test_database(context, environment, overrides)
+    if CacheProperties in sections and Cache not in overrides:
         services[Cache] = InMemoryCache()
+    if RabbitProperties in sections:
+        services |= _in_process_rabbit(context, overrides)
     return services
+
+
+def _test_database(
+    context: ApplicationContext, environment: TestEnvironment, overrides: Mapping[Any, object]
+) -> dict[Any, object]:
+    from snakeboot.data import ENTITY_ATTRIBUTE  # noqa: PLC0415  # reason: only an application with a database
+    from snakeboot.sqlalchemy_data import Database  # noqa: PLC0415  # reason: as above
+    from snakeboot.sqlalchemy_data.testing import in_memory_database, postgresql_database  # noqa: PLC0415  # reason: as above
+
+    if Database in overrides:
+        return {}
+    if environment.database is None:
+        return {Database: in_memory_database()}
+    return {Database: postgresql_database(environment.database.image, context.classes_marked(ENTITY_ATTRIBUTE))}
+
+
+def _in_process_rabbit(context: ApplicationContext, overrides: Mapping[Any, object]) -> dict[Any, object]:
+    from snakeboot.rabbitmq import RabbitTemplate  # noqa: PLC0415  # reason: only an application with a broker
+    from snakeboot.rabbitmq.in_process_rabbit_template import InProcessRabbitTemplate  # noqa: PLC0415  # reason: as above
+
+    return {} if RabbitTemplate in overrides else {RabbitTemplate: InProcessRabbitTemplate(context)}
+
+
+def _close(services: Iterable[object]) -> None:
+    for service in services:
+        close = getattr(service, "close", None)
+        if callable(close):
+            close()
 
 
 def _replaced_where_present(
@@ -191,13 +294,6 @@ def _replaced_where_present(
                 continue
             replaced[component_type] = component
     return replaced
-
-
-def _in_memory_database(replacements: Mapping[Any, object]) -> dict[Any, object]:
-    from snakeboot.sqlalchemy_data import Database  # noqa: PLC0415  # reason: only an application with a database
-    from snakeboot.sqlalchemy_data.testing import in_memory_database  # noqa: PLC0415  # reason: as above
-
-    return {} if Database in replacements else {Database: in_memory_database()}
 
 
 def _create_tables(context: ApplicationContext) -> None:
