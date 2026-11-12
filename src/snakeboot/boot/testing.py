@@ -10,12 +10,14 @@ from wireup.errors import WireupError
 
 from snakeboot.application import ApplicationContext
 from snakeboot.boot.entry_points import CONDITIONAL_MODULES, web_api
+from snakeboot.boot.local_server import LOOPBACK, LocalServer, ServerClient
 from snakeboot.cache import Cache, InMemoryCache
 from snakeboot.component_scan import ComponentScan, application_package, narrowed_application
 from snakeboot.configuration import (
     CacheProperties,
     Configuration,
     DatabaseProperties,
+    OAuth2Properties,
     RabbitProperties,
     ServerProperties,
     sections_declared_in,
@@ -35,6 +37,8 @@ from snakeboot.testing.slices import ApplicationSlice, ModuleSlice
 if TYPE_CHECKING:
     from httpx2 import Response
     from starlette.testclient import TestClient
+
+__all__ = ["LocalServer", "RestClient", "RestResponse", "ServerClient", "TestApplication"]
 
 type RestClient = TestClient
 """The client of `TestApplication.client()`: `get`, `post`, `put`, `patch` and `delete` return a `RestResponse`."""
@@ -58,7 +62,8 @@ class TestApplication:
     cache is an `InMemoryCache`; with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own
     `@rabbit_listener` methods, without a broker (`InProcessRabbitTemplate`); the `@application_module_listener`
     methods run on the caller's thread, so what they did is there when the call that published returns; every event
-    is kept in `published_events`; and the API accepts the tokens of `signed_in_as` next to its own.
+    is kept in `published_events`; the API accepts the tokens of `signed_in_as` next to its own, and with `[oauth2]`
+    the tokens its `AuthorizationServer` signs (`snakeboot.oauth2.testing`). `local_server()` serves it over HTTP.
 
     `snakeboot.testing.application_test` starts it for a test and injects what the test asks for.
     """
@@ -70,13 +75,14 @@ class TestApplication:
         context: ApplicationContext,
         replacements: Mapping[Any, object] | None = None,
         *,
-        published_events: PublishedEvents | None = None,
+        extras: Mapping[type, object] | None = None,
         owned: Sequence[Any] = (),
     ) -> None:
         self._context = context
         self._replacements = dict(replacements or {})
-        self._published_events = published_events if published_events is not None else PublishedEvents()
+        self._extras: dict[type, object] = {PublishedEvents: PublishedEvents(), **(extras or {})}
         self._owned = list(owned)
+        self._server: LocalServer | None = None
 
     @classmethod
     def start(
@@ -123,16 +129,19 @@ class TestApplication:
     @property
     def published_events(self) -> PublishedEvents:
         """Every event the application published since it started, like Spring's `ApplicationEvents`."""
-        return self._published_events
+        return cast("PublishedEvents", self._extras[PublishedEvents])
 
     def get[T](self, component_type: Callable[..., T]) -> T:
         """Returns the component of `component_type`, a double that replaced it included.
 
         A double is also found by its own type: `get(FixedClock)` returns the `FixedClock` that replaced the clock.
-        `get(PublishedEvents)` returns `published_events`.
+        `get(PublishedEvents)` returns `published_events`, `get(LocalServer)` the `local_server()`, and with `[oauth2]`
+        `get(AuthorizationServer)` the authorization server of the test.
         """
-        if component_type is PublishedEvents:
-            return cast("T", self._published_events)
+        if component_type is LocalServer:
+            return cast("T", self.local_server())
+        if isinstance(component_type, type) and component_type in self._extras:
+            return cast("T", self._extras[component_type])
         try:
             return self._context.get(component_type)
         except LookupError:
@@ -162,20 +171,28 @@ class TestApplication:
         from starlette.testclient import TestClient  # noqa: PLC0415  # reason: only a test of the API needs it
 
         server = self._context.configuration.get(ServerProperties)
-        api = web_api(self._context)
-        context = self._context
+        return TestClient(self._asgi_application(), base_url=_base_url_of(server))
 
-        async def lifecycle() -> ApplicationLifecycle:
-            return context.get(ApplicationLifecycle)
+    def local_server(self) -> LocalServer:
+        """Serves the application over HTTP on a free port, the first time it is asked, and returns the server.
 
-        return TestClient(LifecycleAsgiApplication(api, lifecycle=lifecycle), base_url=_base_url_of(server))
+        Like `@SpringBootTest(webEnvironment = RANDOM_PORT)`: `local_server().url` is where it listens, and its
+        `client()` calls it over the network. The lifecycle runs while it serves; closing the application stops it.
+        """
+        if self._server is None:
+            self._server = LocalServer.start(self._asgi_application(also_allowed_hosts=(LOOPBACK, "localhost")))
+        return self._server
 
     def close(self) -> None:
-        """Closes the container and what it holds, and the database of the test: a PostgreSQL copy is dropped."""
+        """Stops its server, closes the container and what it holds, and the database of the test."""
         try:
-            self._context.close()
+            if self._server is not None:
+                self._server.stop()
         finally:
-            _close(self._owned)
+            try:
+                self._context.close()
+            finally:
+                _close(self._owned)
 
     def __enter__(self) -> Self:
         """Returns the started application, which the end of the `with` block closes."""
@@ -196,16 +213,25 @@ class TestApplication:
         doubles: "_Doubles",
         test_components: Mapping[Any, object] | None,
     ) -> Self:
-        events = PublishedEvents()
-        context.refresh(doubles.replacing(), additions=[_recording(events), *doubles.joining_the_container()])
+        extras, additions = _test_extras(context)
+        context.refresh(doubles.replacing(), additions=[*additions, *doubles.joining_the_container()])
         replacements = {**doubles.services, **doubles.explicit}
         replacements |= _replaced_where_present(context, test_components or {}, replacements)
         if DatabaseProperties in context.configuration.sections and environment.database is None:
             _create_tables(context)
         # What the test made for itself, it closes: the database of a test drops its PostgreSQL copy.
-        started = cls(context, replacements, published_events=events, owned=list(doubles.services.values()))
+        started = cls(context, replacements, extras=extras, owned=list(doubles.services.values()))
         started._accept_signed_in_tokens()
         return started
+
+    def _asgi_application(self, *, also_allowed_hosts: tuple[str, ...] = ()) -> LifecycleAsgiApplication:
+        api = web_api(self._context, also_allowed_hosts=also_allowed_hosts)
+        context = self._context
+
+        async def lifecycle() -> ApplicationLifecycle:
+            return context.get(ApplicationLifecycle)
+
+        return LifecycleAsgiApplication(api, lifecycle=lifecycle)
 
     def _double_of(self, component_type: object) -> object | None:
         if not isinstance(component_type, type):
@@ -288,6 +314,32 @@ class _PublishedEventsListener:
     def record(self, event: object) -> None:
         """Keeps `event`."""
         self._events.record(event)
+
+
+def _test_extras(context: ApplicationContext) -> tuple[dict[type, object], list[object]]:
+    """What a test reaches besides the container: its `PublishedEvents`, and with `[oauth2]` an authorization server;
+    and the injectables that connect them to the application."""
+    events = PublishedEvents()
+    extras: dict[type, object] = {PublishedEvents: events}
+    additions = [_recording(events)]
+    if OAuth2Properties in context.configuration.sections:
+        issuer, signing_keys = _authorization_server(context.configuration.get(OAuth2Properties))
+        extras[type(issuer)] = issuer
+        additions.append(signing_keys)
+    return extras, additions
+
+
+def _authorization_server(properties: OAuth2Properties) -> tuple[object, object]:
+    from snakeboot.oauth2 import JwtSigningKeys  # noqa: PLC0415  # reason: only an application with [oauth2]
+    from snakeboot.oauth2.testing import AuthorizationServer  # noqa: PLC0415  # reason: as above
+
+    issuer = AuthorizationServer(properties)
+    keys = issuer.signing_keys()
+
+    def provide_signing_keys() -> JwtSigningKeys | None:
+        return keys
+
+    return issuer, wireup.injectable(provide_signing_keys)
 
 
 def _recording(events: PublishedEvents) -> object:

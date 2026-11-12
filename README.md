@@ -52,6 +52,7 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `PublishedEvents`, `InProcessRabbitTemplate` | Spring's `ApplicationEvents`, Spring Modulith's `PublishedEvents`, Spring AMQP's `TestRabbitTemplate` | `snakeboot[testing]` |
 | `PostgreSQLContainer`, `TestEnvironment` | Testcontainers' `PostgreSQLContainer` with `@ServiceConnection`, Flyway in tests, `ddl-auto=validate`, `@ActiveProfiles` | `snakeboot[testing,testcontainers]` |
 | `@web_test`, `@application_module_test` | `@WebMvcTest`, Spring Modulith's `@ApplicationModuleTest` | `snakeboot[testing]` |
+| `LocalServer`, `eventually`, `AuthorizationServer` | `webEnvironment = RANDOM_PORT`, `@LocalServerPort`, Awaitility, a mock JWT issuer | `snakeboot[testing]`, with `oauth2` for the issuer |
 
 ## Install
 
@@ -562,6 +563,19 @@ A dependency that nobody gave stops the test and names it, as Spring's context d
 section stays in every slice, since the configuration reads every table: give sections a module of their own. And
 what a slice leaves out stays out, even where a module it holds imports it: wireup registers a module's imports too,
 so snakeboot leaves out every member defined in a module the scan excludes.
+
+Three more things a test may ask for:
+
+* `Autowired[LocalServer]` serves the application over HTTP on a free port, like
+  `@SpringBootTest(webEnvironment = RANDOM_PORT)` with `@LocalServerPort`: `server.url`, and `server.client()` calls it
+  over the network, with the lifecycle running. For what the client in the test's process cannot show: a browser,
+  CORS, a stream of server-sent events as it arrives.
+* With `[oauth2]`, `Autowired[AuthorizationServer]` (`snakeboot.oauth2.testing`) stands in for Keycloak: it signs real
+  JWTs, `keycloak.signed_in("carol", realm_access={"roles": ["auctioneer"]})`, which the application's own
+  `JwtBearerAuthentication` checks and its own `roles_of` maps, as in production; `exp=` or `iss=` shows what it
+  refuses. `signed_in_as` keeps working beside it.
+* `eventually(check, within=5)` tries a check until it holds, like Awaitility, for code on a thread of its own: the
+  scheduler, listeners with the lifecycle running, a `LocalServer`.
 
 Underneath, `TestApplication` starts the application as it runs, from its `application.toml`, like `@SpringBootTest`
 with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace components with doubles,

@@ -1,6 +1,6 @@
 import logging
 from collections.abc import Mapping
-from typing import Any, Final, override
+from typing import Any, Final, Protocol, override
 
 import jwt
 
@@ -17,6 +17,14 @@ KEY_LIFESPAN_SECONDS: Final = 300
 """How long the issuer's public keys are kept before they are fetched again (a key rotation takes at most this)."""
 
 
+class JwtSigningKeys(Protocol):
+    """Where the key that signed a token comes from: the issuer's key set, or the key of a test."""
+
+    def get_signing_key_from_jwt(self, token: str) -> jwt.PyJWK:
+        """Returns the public key that verifies `token`'s signature; raises `jwt.PyJWTError` when there is none."""
+        ...
+
+
 class JwtBearerAuthentication(BearerAuthentication, component=False):
     """Accepts the signed JWT access tokens of one authorization server, like Spring's oauth2 resource server.
 
@@ -30,12 +38,17 @@ class JwtBearerAuthentication(BearerAuthentication, component=False):
 
         class PlayerTokens(JwtBearerAuthentication):
             \"\"\"The access tokens that Keycloak gives the platform's players.\"\"\"
+
+    `signing_keys` stand in for the issuer's key set: the container has them only in a test, from the
+    `AuthorizationServer` of `snakeboot.oauth2.testing`, which signs tokens the test writes itself.
     """
 
-    def __init__(self, properties: OAuth2Properties) -> None:
+    def __init__(self, properties: OAuth2Properties, signing_keys: JwtSigningKeys | None = None) -> None:
         self._issuer = properties.issuer_uri
         self._audience = properties.audience
-        self._signing_keys = jwt.PyJWKClient(properties.jwks_uri, cache_keys=True, lifespan=KEY_LIFESPAN_SECONDS)
+        self._signing_keys: JwtSigningKeys = signing_keys or jwt.PyJWKClient(
+            properties.jwks_uri, cache_keys=True, lifespan=KEY_LIFESPAN_SECONDS
+        )
 
     @override
     def authenticate(self, token: str) -> Principal | None:

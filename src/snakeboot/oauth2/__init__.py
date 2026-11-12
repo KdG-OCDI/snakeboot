@@ -11,6 +11,6 @@ endpoint's `Principal` is its subject. It knows the REST library, the configurat
 (extra: snakeboot[oauth2]).
 """
 
-from snakeboot.oauth2.jwt_bearer_authentication import JwtBearerAuthentication
+from snakeboot.oauth2.jwt_bearer_authentication import JwtBearerAuthentication, JwtSigningKeys
 
-__all__ = ["JwtBearerAuthentication"]
+__all__ = ["JwtBearerAuthentication", "JwtSigningKeys"]

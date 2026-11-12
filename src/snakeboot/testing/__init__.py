@@ -31,6 +31,7 @@ from snakeboot.testing.application_marker import (
 from snakeboot.testing.component_replacements import InvalidTestComponentError, test_component
 from snakeboot.testing.declared_classes import declared_classes, qualified_names
 from snakeboot.testing.environment import PostgreSQLContainer, TestEnvironment
+from snakeboot.testing.eventually import eventually
 from snakeboot.testing.injection import Autowired, MockComponent, SpyComponent
 from snakeboot.testing.published_events import PublishedEvents
 from snakeboot.testing.recording_transaction_manager import RecordingTransactionManager
@@ -58,6 +59,7 @@ __all__ = [
     "application_module_test",
     "application_test",
     "declared_classes",
+    "eventually",
     "qualified_names",
     "signed_in_as",
     "test_component",

@@ -91,16 +91,22 @@ def application_variable_of(application: type) -> str:
     return f"{application.__module__}:{application.__qualname__}"
 
 
-def web_api(context: ApplicationContext) -> "FastAPI":
-    """Returns the REST API of a started application, with its `[server]`, its `[cors]` and its actuator."""
+def web_api(context: ApplicationContext, *, also_allowed_hosts: tuple[str, ...] = ()) -> "FastAPI":
+    """Returns the REST API of a started application, with its `[server]`, its `[cors]` and its actuator.
+
+    `also_allowed_hosts` adds hosts to `[server] allowed_hosts`, as a test's server on this machine adds its own.
+    """
     # Imported here: a process that only runs a command needs no web framework.
     from snakeboot.fastapi_web import rest_api  # noqa: PLC0415  # reason: FastAPI loads only for the server
 
     configuration = context.configuration
+    server = configuration.get(ServerProperties)
+    if also_allowed_hosts and "*" not in server.allowed_hosts:
+        server = server.model_copy(update={"allowed_hosts": (*server.allowed_hosts, *also_allowed_hosts)})
     return rest_api(
         context.application,
         context.get,
-        server=configuration.get(ServerProperties),
+        server=server,
         cors=configuration.get(CorsProperties) if CorsProperties in configuration.sections else None,
         actuator=context.get(Actuator),
     )

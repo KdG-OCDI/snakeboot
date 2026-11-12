@@ -1,0 +1,13 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+workers = 1
+debug = false
+allowed_hosts = ["vault.example"]
+log_level = "WARNING"
+
+# A Keycloak that nobody runs: a test signs its own tokens with snakeboot.oauth2.testing.AuthorizationServer.
+[oauth2]
+issuer_uri = "http://localhost:8180/realms/vault"
+jwks_uri = "http://keycloak.invalid/realms/vault/protocol/openid-connect/certs"
+audience = "vault-api"

@@ -52,6 +52,15 @@ Tests in Spring Boot's style, without conftest.py, fixtures or settings:
   package, configuration and OpenAPI definition kept.
 - What a module defines that the component scan excludes stays out of the container, even where a scanned module
   imports it: wireup registers a module's imports too, so an `exclude` let a component in through an import.
+- `Autowired[LocalServer]` and `TestApplication.local_server()`, like `webEnvironment = RANDOM_PORT`: the application
+  served over HTTP on a free port, with the lifecycle running; `server.url`, `server.port`, `server.client()`.
+  `web_api(..., also_allowed_hosts=...)` lets it accept `127.0.0.1` besides `[server] allowed_hosts`.
+- With `[oauth2]`, `Autowired[AuthorizationServer]` (`snakeboot.oauth2.testing`) signs real JWTs with a key of the test,
+  `signed_in("carol", realm_access=...)`, which the application's own `JwtBearerAuthentication` checks and maps with its
+  own `roles_of`. `JwtBearerAuthentication(properties, signing_keys=...)` takes the keys a test gives
+  (`JwtSigningKeys`); without them, the issuer's key set, as before.
+- `eventually(check, within=..., every=...)`, like Awaitility: tries a check until it holds, for code on a thread of its
+  own.
 
 ## 0.11.1
 
