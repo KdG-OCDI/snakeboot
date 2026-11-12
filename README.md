@@ -464,7 +464,7 @@ components it asks for by type. A test component replaces a component in every t
 
 ```python
 # tests/doubles/fixed_clock.py
-@test_component(replaces=ClockPort)                       # found in the source; built anew for every test
+@test_component(replaces=ClockPort)  # found in the source; built anew for every test
 class FixedClock(ClockPort):
     def __init__(self, now: datetime = NOW) -> None: ...
     def advance(self, duration: timedelta) -> None: ...
@@ -473,9 +473,9 @@ class FixedClock(ClockPort):
 # tests/test_orders.py
 @application_test
 class TestOrders:
-    client: Autowired[RestClient]                         # @Autowired: calls the REST API in this process
-    clock: Autowired[FixedClock]                          # a test component, by its own type
-    payments: MockComponent[PaymentPort]                  # @MockitoBean; SpyComponent[...] is @MockitoSpyBean
+    client: Autowired[RestClient]  # @Autowired: calls the REST API in this process
+    clock: Autowired[FixedClock]  # a test component, by its own type
+    payments: MockComponent[PaymentPort]  # @MockitoBean; SpyComponent[...] is @MockitoSpyBean
 
     def test_an_order_waits_while_the_payments_are_down(self) -> None:
         when(self.payments.charge).then_raise(ConnectionError("down"))
