@@ -11,7 +11,9 @@ from snakeboot.configuration import (
     Configuration,
     ConfigurationFileNotFoundError,
     DatabaseProperties,
+    InvalidConfigurationPropertiesError,
     ServerProperties,
+    begin_configuration,
     load_configuration,
 )
 from tests.configuration.sample_service.greeting_properties import (
@@ -172,3 +174,47 @@ def test_a_section_cannot_be_changed_after_loading() -> None:
 
     with pytest.raises(ValidationError, match="frozen"):
         greeting.text = "Goodbye"
+
+
+def test_the_properties_of_a_test_win_over_the_files_and_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("GREETING__REPEAT", "3")
+
+    configuration = begin_configuration(
+        ServerProperties,
+        GreetingProperties,
+        package=SAMPLE,
+        properties={"greeting.repeat": 5, "greeting.sender.name": "ann"},
+    )
+
+    greeting = configuration.get(GreetingProperties)
+    assert (greeting.repeat, greeting.sender.name, greeting.sender.address) == (5, "ann", "noreply@greeting.example")
+
+
+def test_the_profile_of_a_test_wins_over_the_variable(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv(PROFILE_VARIABLE, "email")
+
+    configuration = begin_configuration(ServerProperties, GreetingProperties, package=SAMPLE, profile="local")
+
+    assert configuration.profile == "local"
+    assert configuration.get(GreetingProperties).channel.kind == "log"
+
+
+def test_the_profile_of_a_test_is_one_lowercase_name() -> None:
+    with pytest.raises(ConfigurationFileNotFoundError, match="one lowercase name"):
+        begin_configuration(ServerProperties, package=SAMPLE, profile="Local")
+
+
+def test_a_property_of_a_table_no_section_claims_stops_the_start() -> None:
+    configuration = begin_configuration(
+        ServerProperties, GreetingProperties, package=SAMPLE, properties={"unknown.key": 1}
+    )
+
+    with pytest.raises(ValidationError, match="unknown"):
+        configuration.complete()
+
+
+def test_a_property_cannot_name_a_key_inside_a_value() -> None:
+    with pytest.raises(InvalidConfigurationPropertiesError, match="names a key inside a value"):
+        begin_configuration(
+            ServerProperties, package=SAMPLE, properties={"greeting.repeat": 1, "greeting.repeat.times": 2}
+        )

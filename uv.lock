@@ -1190,6 +1190,7 @@ rabbitmq = [
 ]
 testing = [
     { name = "httpx2" },
+    { name = "pytest" },
 ]
 vector = [
     { name = "pgvector" },
@@ -1235,6 +1236,7 @@ requires-dist = [
     { name = "pydantic-settings", marker = "extra == 'rabbitmq'", specifier = ">=2.16.0,<3" },
     { name = "pydantic-settings", marker = "extra == 'web'", specifier = ">=2.16.0,<3" },
     { name = "pyjwt", extras = ["crypto"], marker = "extra == 'oauth2'", specifier = ">=2.10.1" },
+    { name = "pytest", marker = "extra == 'testing'", specifier = ">=8.4" },
     { name = "redis", marker = "extra == 'cache'", specifier = ">=8.1.0" },
     { name = "sqlalchemy", marker = "extra == 'data'", specifier = ">=2.1.8" },
     { name = "uvicorn", marker = "extra == 'web'", specifier = ">=0.54.0" },

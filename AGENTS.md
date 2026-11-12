@@ -13,8 +13,9 @@
   wireup; `event_publication` and `scheduler_lock` keep snakeboot's own tables in snakeboot's terms, through `data`;
   `application` starts an application in no framework's terms. Each binding knows one framework: `fastapi_web`
   publishes `rest` and `actuator` on FastAPI, `sqlalchemy_data` binds `data` and `transaction` to SQLAlchemy and
-  Alembic, `redis_cache` binds `cache` to Redis; `boot` names the bindings an application starts on. The
-  import-linter contracts in `pyproject.toml` enforce it.
+  Alembic, `redis_cache` binds `cache` to Redis, `pytest_testing` binds `testing` to pytest (its plugin starts
+  boot's `TestApplication` and imports nothing heavy until a test needs it); `boot` names the bindings an
+  application starts on. The import-linter contracts in `pyproject.toml` enforce it.
 * An application imports snakeboot, never the framework underneath. Only the bindings and `boot` know FastAPI,
   Starlette, SQLAlchemy, Alembic or Redis; whatever an application writes (entry points, controllers, entities,
   repositories, migrations, commands, listeners, sections, tests) is in snakeboot's terms, so a binding to another

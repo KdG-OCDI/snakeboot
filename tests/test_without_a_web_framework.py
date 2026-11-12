@@ -32,6 +32,7 @@ PACKAGES_OF_AN_APPLICATION = (
     "snakeboot.oauth2",
     "snakeboot.rabbitmq",
     "snakeboot.testing",
+    "snakeboot.pytest_testing.pytest_plugin",
 )
 
 

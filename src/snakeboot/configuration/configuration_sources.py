@@ -1,7 +1,7 @@
 import os
 import re
 from collections.abc import Iterable, Mapping
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from typing import Any, Final, Literal, override
@@ -30,18 +30,31 @@ type UnknownTables = Literal["ignore", "forbid"]
 class ConfigurationSources:
     """Where the values come from: application.toml in `package`, the file of the active profile and the environment.
 
-    The profile and the files are fixed when the sources are found, so reading twice reads the same files.
+    A test may add `properties`, which override every other source, like `@SpringBootTest(properties = ...)`. The
+    profile and the files are fixed when the sources are found, so reading twice reads the same files.
     """
 
     package: str
     profile: str | None
     files: tuple[Traversable, ...]
+    properties: Mapping[str, Any] = field(default_factory=dict)
 
     @classmethod
-    def of(cls, package: str) -> "ConfigurationSources":
-        """Finds the files of `package` and the active profile; a missing file stops the start."""
-        profile = _active_profile()
-        return cls(package=package, profile=profile, files=_configuration_files(package, profile))
+    def of(
+        cls, package: str, *, profile: str | None = None, properties: Mapping[str, object] | None = None
+    ) -> "ConfigurationSources":
+        """Finds the files of `package` and the active profile; a missing file stops the start.
+
+        `profile` activates a profile, like `@ActiveProfiles`, whatever SNAKEBOOT_PROFILE says. `properties` name a
+        key with its table, `{"scheduling.auto_startup": False}`, and win over the files and the environment.
+        """
+        active = _checked_profile(profile) if profile is not None else _active_profile()
+        return cls(
+            package=package,
+            profile=active,
+            files=_configuration_files(package, active),
+            properties=_nested(properties or {}),
+        )
 
     def read(
         self,
@@ -54,7 +67,7 @@ class ConfigurationSources:
 
         `unknown_tables="forbid"` refuses a table that no section claims; `"ignore"` leaves it for a later read.
         """
-        loaded = _root_model(required, optional, self.files, unknown_tables=unknown_tables)()
+        loaded = _root_model(required, optional, self.files, unknown_tables=unknown_tables)(**self.properties)
         read = {section: getattr(loaded, prefix) for prefix, section in {**required, **optional}.items()}
         return {section: value for section, value in read.items() if value is not None}
 
@@ -80,6 +93,28 @@ def _active_profile() -> str | None:
             f"{PROFILE_VARIABLE}={profile!r} cannot name a profile file: a profile is one lowercase name."
         )
     return profile or None
+
+
+def _checked_profile(profile: str) -> str:
+    if not _PROFILE_NAME.fullmatch(profile):
+        raise ConfigurationFileNotFoundError(
+            f"The profile {profile!r} cannot name a profile file: a profile is one lowercase name."
+        )
+    return profile
+
+
+def _nested(properties: Mapping[str, object]) -> dict[str, Any]:
+    """`{"greeting.sender.name": "ann"}` as the tables it names: `{"greeting": {"sender": {"name": "ann"}}}`."""
+    nested: dict[str, Any] = {}
+    for key, value in properties.items():
+        *tables, name = key.split(".")
+        table = nested
+        for part in tables:
+            table = table.setdefault(part, {})
+            if not isinstance(table, dict):
+                raise InvalidConfigurationPropertiesError(f"The property {key!r} names a key inside a value.")
+        table[name] = value
+    return nested
 
 
 def _configuration_files(package: str, profile: str | None) -> tuple[Traversable, ...]:
@@ -117,8 +152,13 @@ def _root_model(
             dotenv_settings: PydanticBaseSettingsSource,
             file_secret_settings: PydanticBaseSettingsSource,
         ) -> tuple[PydanticBaseSettingsSource, ...]:
-            # Only the environment and the files: no initial values, no .env file, no secrets directory.
-            return env_settings, TomlConfigSettingsSource(settings_cls, toml_file=list(toml_files), deep_merge=True)
+            # A test's properties, the environment and the files: no .env file, no secrets directory. An earlier
+            # source wins, key by key.
+            return (
+                init_settings,
+                env_settings,
+                TomlConfigSettingsSource(settings_cls, toml_file=list(toml_files), deep_merge=True),
+            )
 
     fields: dict[str, Any] = {prefix: (section, ...) for prefix, section in required.items()}
     # An optional section is absent when no file and no variable has its table; the root model may say so.

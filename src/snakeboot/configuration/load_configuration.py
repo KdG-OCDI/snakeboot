@@ -1,4 +1,4 @@
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 
 from snakeboot.configuration.configuration import Configuration
 from snakeboot.configuration.configuration_sources import ConfigurationSources, sections_by_prefix
@@ -28,15 +28,20 @@ def load_configuration(*sections: type[Section], package: str) -> Configuration:
 
 
 def begin_configuration(
-    *sections: type[Section], optional: Sequence[type[Section]] = (), package: str
+    *sections: type[Section],
+    optional: Sequence[type[Section]] = (),
+    package: str,
+    profile: str | None = None,
+    properties: Mapping[str, object] | None = None,
 ) -> Configuration:
     """Reads the sections known before the container is built; `Configuration.complete` reads the others.
 
     `optional` sections are read when the files or the environment have their table, and are absent otherwise.
-    Every other table waits for `complete`, which refuses the tables that no section claims.
+    Every other table waits for `complete`, which refuses the tables that no section claims. A test may activate a
+    `profile` and set `properties` that win over every source, as `snakeboot.boot.testing` does for its tests.
     """
     return Configuration(
-        ConfigurationSources.of(package),
+        ConfigurationSources.of(package, profile=profile, properties=properties),
         required=sections_by_prefix(sections),
         optional=sections_by_prefix(optional),
     )

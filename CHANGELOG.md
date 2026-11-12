@@ -3,6 +3,33 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.11,<0.12`.
 
+## Unreleased
+
+Tests in Spring Boot's style, without conftest.py, fixtures or settings:
+
+- `@application_test`, like `@SpringBootTest`: every test it marks gets the application, started anew, and what it asks
+  for by type, in its fields (a class) or its parameters (a function): `Autowired[T]`, like `@Autowired`;
+  `MockComponent[T]`, a mock that replaces the component for one test, like `@MockitoBean`; `SpyComponent[T]`, the
+  component wrapped in a spy, like `@MockitoSpyBean`; `Autowired[RestClient]`, a client of the REST API.
+  `@application_test(application=..., profile=..., properties=...)` names the application, activates a profile and sets
+  properties that win over every other source.
+- `@test_component(replaces=ClockPort)`, like `@TestComponent` with `@Primary`: a class of the tests that replaces a
+  component in every `@application_test`, built anew for each, and reachable by its own type (`Autowired[FixedClock]`).
+- The application and the test components are found in the project's source on Python's path, as Spring Boot finds
+  the `@SpringBootConfiguration`; the source is read, not imported, and `site-packages` is left alone.
+- `when(mock.method).then_return(...)`, `then_raise`, `then_answer` and `verify(mock.method).called_once_with(...)`,
+  `called_with`, `called_times`, `never_called`: Mockito, in the types of the port, so a type checker refuses an answer
+  or an argument of the wrong type.
+- `signed_in_as("ann", roles={"writer"})`, like spring-security-test's `jwt()`: the headers of a call by ann, which the
+  application of a test accepts next to its own tokens; its own `@roles_allowed` decide.
+- `snakeboot.pytest_testing`, the binding of `testing` to pytest: pytest loads its plugin through the entry point
+  `pytest11`. `snakeboot[testing]` brings pytest.
+- `TestApplication.start(..., profile=..., properties=..., test_components=...)`, `TestApplication.spy(T)`;
+  `TestApplication.get` finds a double by its own type too; with `[cache]` a test gets an `InMemoryCache`; the API
+  accepts the tokens of `signed_in_as`.
+- `begin_configuration(..., profile=..., properties=...)` and `ApplicationContext.of(..., profile=..., properties=...)`;
+  `ApplicationContext.replace_component` replaces a component of the built container, and names what it lacks.
+
 ## 0.11.1
 
 - `migrate` on SQLite runs a script statement by statement in the migration's own transaction, so a failing script

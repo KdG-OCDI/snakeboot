@@ -69,10 +69,22 @@ class ApplicationContext(ApplicationComponents):
         self._container: SyncContainer | None = None
 
     @classmethod
-    def of(cls, application: type, conditional: ConditionalModules) -> Self:
-        """Reads the configuration of `application` and its modules, and configures logging; builds nothing yet."""
+    def of(
+        cls,
+        application: type,
+        conditional: ConditionalModules,
+        *,
+        profile: str | None = None,
+        properties: Mapping[str, object] | None = None,
+    ) -> Self:
+        """Reads the configuration of `application` and its modules, and configures logging; builds nothing yet.
+
+        A test may activate a `profile` and set `properties` that win over the files and the environment.
+        """
         package = application_package(application)
-        configuration = begin_configuration(ServerProperties, optional=OPTIONAL_SECTIONS, package=package)
+        configuration = begin_configuration(
+            ServerProperties, optional=OPTIONAL_SECTIONS, package=package, profile=profile, properties=properties
+        )
         logging_properties = (
             configuration.get(LoggingProperties) if LoggingProperties in configuration.sections else None
         )
@@ -117,9 +129,23 @@ class ApplicationContext(ApplicationComponents):
             config={CONFIGURATION_KEY: self.configuration},
         )
         for component_type, replacement in (overrides or {}).items():
-            self._container.override.set(component_type, replacement)
+            self.replace_component(component_type, replacement)
         if DatabaseProperties in self.configuration.sections:
             TransactionManagerRegistry.install(self.get(TransactionManager))
+
+    def replace_component(self, component_type: Any, replacement: object) -> None:
+        """Replaces the component of `component_type` in the built container, as a test replaces a port with a double.
+
+        Components built before keep what they were given, so a test replaces a component before it is first used.
+        A type the container does not have stops the start: there is nothing to replace.
+        """
+        name = getattr(component_type, "__qualname__", repr(component_type))
+        if self._container is None:
+            raise LookupError(f"The application is not started yet: refresh() builds the {name} to replace.")
+        try:
+            self._container.override.set(component_type, replacement)
+        except WireupError as error:
+            raise LookupError(f"The container has no {name} to replace: {error}") from error
 
     def close(self) -> None:
         """Closes the container, which releases what its components hold (the database's connections, for one)."""

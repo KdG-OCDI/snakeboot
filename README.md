@@ -46,7 +46,9 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `@scheduler_lock` | ShedLock's `@SchedulerLock` | `snakeboot[data]` |
 | `@rabbit_listener`, `RabbitTemplate`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
-| `TestApplication`, `RecordingTransactionManager`, `declared_classes` | `@SpringBootTest`, `@AutoConfigureTestDatabase`, `TestRestTemplate`, spring-test | `snakeboot[testing]` |
+| `@application_test`, `Autowired`, `@test_component`, `TestApplication` | `@SpringBootTest`, `@Autowired`, `@TestComponent` with `@Primary`, `@AutoConfigureTestDatabase`, `TestRestTemplate` | `snakeboot[testing]` |
+| `MockComponent`, `SpyComponent`, `when`, `verify` | `@MockitoBean`, `@MockitoSpyBean`, Mockito's `when` and `verify` | `snakeboot[testing]` |
+| `signed_in_as`, `RecordingTransactionManager`, `declared_classes` | spring-security-test's `jwt()`, spring-test | `snakeboot[testing]` |
 
 ## Install
 
@@ -451,11 +453,59 @@ redis_url = "redis://redis:6379/1"` (extra `snakeboot[cache]`) it is Redis; a te
 self._cache.put(question, {"text": answer, "sources": sources}, time_to_live=timedelta(hours=1))
 ```
 
-**Tests.** `TestApplication` starts the application as it runs, from its `application.toml`, with three differences,
-like `@SpringBootTest` with `@AutoConfigureTestDatabase`: `overrides` replace components with doubles, the database is a
-fresh SQLite in memory whose tables come from the entities, and the `@application_module_listener` methods run on the
-caller's thread, so what they did is there when the call returns. `client()` calls the REST API in the same process, like
-`TestRestTemplate`; used as a context manager, the lifecycle runs around it.
+**Tests.** `@application_test` is `@SpringBootTest`: every test it marks gets the application, started anew, and the
+components it asks for by type. A test component replaces a component in every test, like a `@TestComponent` with
+`@Primary`; a `MockComponent` replaces one for a single test, like `@MockitoBean`.
+
+```python
+# tests/doubles/fixed_clock.py
+@test_component(replaces=ClockPort)                       # found in the source; built anew for every test
+class FixedClock(ClockPort):
+    def __init__(self, now: datetime = NOW) -> None: ...
+    def advance(self, duration: timedelta) -> None: ...
+
+
+# tests/test_orders.py
+@application_test
+class TestOrders:
+    client: Autowired[RestClient]                         # @Autowired: calls the REST API in this process
+    clock: Autowired[FixedClock]                          # a test component, by its own type
+    payments: MockComponent[PaymentPort]                  # @MockitoBean; SpyComponent[...] is @MockitoSpyBean
+
+    def test_an_order_waits_while_the_payments_are_down(self) -> None:
+        when(self.payments.charge).then_raise(ConnectionError("down"))
+
+        response = self.client.post(
+            "/api/orders", json={"item": "book"}, headers=signed_in_as("ann", roles={"customer"})
+        )
+
+        assert response.json()["status"] == "WAITING"
+        verify(self.payments.charge).called_once_with("book")
+```
+
+There is nothing to configure: no conftest.py, no fixtures. pytest loads snakeboot's plugin by itself, and the plugin
+reads the project's source, as Spring Boot searches for the `@SpringBootConfiguration`: the one `@application_root` is
+the application, every `@test_component` a test component. `@application_test(application=...)` names the application
+where the source holds more than one. On a function, the parameters are filled instead of fields, and its other
+parameters stay pytest's fixtures. Every test gets an application of its own, with fresh test components and mocks,
+so nothing needs to be emptied between tests, where Spring keeps one context.
+
+* `signed_in_as("ann", roles={"customer"})` are the headers of a call by ann, like spring-security-test's `jwt()`: the
+  application of a test accepts them next to its own tokens, and its own `@roles_allowed` decide. Keycloak never runs.
+* `when(...)` and `verify(...)` are Mockito's, in the types of the port: `then_return("no")` where the port returns a
+  `bool`, or `called_once_with` with an argument of the wrong type, is refused by the type checker.
+* `@application_test(profile="test", properties={"scheduling.auto_startup": False})` activates a profile, like
+  `@ActiveProfiles`, and sets properties that win over the files and the environment, like
+  `@SpringBootTest(properties = ...)`.
+* An unknown type, a test component without a constructor without arguments or two test components for one component
+  stop the test before it runs.
+
+Underneath, `TestApplication` starts the application as it runs, from its `application.toml`, like `@SpringBootTest`
+with `@AutoConfigureTestDatabase`: `overrides` replace components with doubles, the database is a fresh SQLite in
+memory whose tables come from the entities, the cache an `InMemoryCache`, and the `@application_module_listener`
+methods run on the caller's thread, so what they did is there when the call returns. `client()` calls the REST API in
+the same process, like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may use it
+directly:
 
 ```python
 def test_a_started_game_can_be_read() -> None:
@@ -477,7 +527,7 @@ architecture test compare what the source declares with what the component scan 
   configuration stops the application.
 * An application imports snakeboot, never the framework underneath: only `snakeboot.fastapi_web`,
   `snakeboot.sqlalchemy_data`, `snakeboot.redis_cache` and `snakeboot.boot` know FastAPI, SQLAlchemy, Alembic or Redis,
-  so another framework means another binding, not other applications.
+  and only `snakeboot.pytest_testing` knows pytest, so another framework means another binding, not other applications.
 * Each package knows as little as possible; `uv run lint-imports` enforces it.
 
 ## Develop

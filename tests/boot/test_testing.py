@@ -8,6 +8,7 @@ import pytest
 
 from snakeboot.boot.testing import RestClient, RestResponse, TestApplication
 from snakeboot.configuration import ServerProperties
+from snakeboot.testing import verify
 from tests.application.sample_service.games.game_record import GameRecords
 from tests.application.sample_service.games.game_rest_controller import Announcer
 from tests.application.sample_service.sample_service_application import SampleServiceApplication
@@ -85,3 +86,45 @@ def test_the_health_checks_the_database_and_the_metrics_time_the_calls(applicati
 
     assert health == {"status": "UP", "service": "sample_service", "components": {"database": {"status": "UP"}}}
     assert 'http_server_requests_seconds_count{method="POST",status="201",uri="/api/games"} 1.0' in metrics
+
+
+class Unrelated:
+    """A type the sample service has no component of."""
+
+
+def test_a_test_component_replaces_a_component_the_application_has_and_is_found_by_its_own_type() -> None:
+    announcer = RecordingAnnouncer()
+
+    with TestApplication.start(
+        SampleServiceApplication, test_components={Announcer: announcer, Unrelated: Unrelated()}
+    ) as started:
+        assert started.get(Announcer) is announcer
+        assert started.get(RecordingAnnouncer) is announcer
+
+
+def test_an_override_wins_over_a_test_component(announcer: RecordingAnnouncer) -> None:
+    with TestApplication.start(
+        SampleServiceApplication, overrides={Announcer: announcer}, test_components={Announcer: RecordingAnnouncer()}
+    ) as started:
+        assert started.get(Announcer) is announcer
+
+
+def test_an_override_of_a_component_the_application_lacks_stops_the_start() -> None:
+    with pytest.raises(LookupError, match="The container has no Unrelated to replace"):
+        TestApplication.start(SampleServiceApplication, overrides={Unrelated: Unrelated()})
+
+
+def test_a_spy_does_what_the_component_does_and_records_its_calls(application: TestApplication) -> None:
+    games = application.spy(GameRecords)
+
+    created = application.client().post("/api/games", json={"status": "waiting"}).json()
+
+    assert games.count_by_status("waiting") == 1
+    verify(games.count_by_status).called_once_with("waiting")
+    assert application.get(GameRecords) is games
+    assert created["status"] == "waiting"
+
+
+def test_properties_reach_the_configuration() -> None:
+    with TestApplication.start(SampleServiceApplication, properties={"server.allowed_hosts": ["games.example"]}) as app:
+        assert app.configuration.get(ServerProperties).allowed_hosts == ("games.example",)
