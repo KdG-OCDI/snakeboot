@@ -1,9 +1,9 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.11,<0.12`.
+a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
 
-## Unreleased
+## 0.12.0
 
 Tests in Spring Boot's style, without conftest.py, fixtures or settings:
 
@@ -61,6 +61,17 @@ Tests in Spring Boot's style, without conftest.py, fixtures or settings:
   (`JwtSigningKeys`); without them, the issuer's key set, as before.
 - `eventually(check, within=..., every=...)`, like Awaitility: tries a check until it holds, for code on a thread of its
   own.
+
+Moving an application from 0.11:
+
+| 0.11 | 0.12 |
+|---|---|
+| fixtures around `TestApplication.start(...)` and `application.get(...)` | `@application_test` with `Autowired`, `MockComponent` and `@test_component`; the fixtures keep working |
+| with `[cache]`, a test without an override of `Cache` used Redis | it gets an `InMemoryCache` |
+| with `[rabbitmq]`, a test's `RabbitTemplate` sent to the broker | it hands the message to the application's own `@rabbit_listener` methods, without a broker |
+| a test's own `BearerAuthentication` double, such as static tokens | `signed_in_as(name, roles=...)`, or with `[oauth2]` the test's `AuthorizationServer` |
+| `snakeboot[testing]` brought httpx2 | it brings pytest too, and pytest loads snakeboot's plugin by itself |
+| a component of an `exclude`d module, imported by a scanned one, joined the container | it stays out |
 
 ## 0.11.1
 
