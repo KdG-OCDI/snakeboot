@@ -17,6 +17,7 @@ from snakeboot.sqlalchemy_data.database import Database
 from snakeboot.sqlalchemy_data.database_health_indicator import DatabaseHealthIndicator
 from snakeboot.sqlalchemy_data.entity_mapping import EntityMapping
 from snakeboot.sqlalchemy_data.migration_generator import MigrationGenerator
+from snakeboot.sqlalchemy_data.schema_entities import entities_of_the_schema
 from snakeboot.sqlalchemy_data.schema_migrations import SchemaMigrations, migration_locations, migrations_in
 from snakeboot.sqlalchemy_data.sqlalchemy_repository_operations import SqlAlchemyRepositoryOperations
 from snakeboot.sqlalchemy_data.sqlalchemy_transaction_manager import SqlAlchemyTransactionManager
@@ -64,6 +65,9 @@ def schema_migrations(database: Database, mapping: EntityMapping, properties: Da
 
 
 @injectable
-def migration_generator(database: Database, mapping: EntityMapping, migrations: SchemaMigrations) -> MigrationGenerator:
-    """Provides what `make_migration` writes the next migration with."""
-    return MigrationGenerator(database, mapping, migrations)
+def migration_generator(
+    database: Database, components: ApplicationComponents, migrations: SchemaMigrations
+) -> MigrationGenerator:
+    """Provides what `make_migration` writes the next migration with: the tables of the entities of the schema, so a
+    table of snakeboot's own only once a method needs it."""
+    return MigrationGenerator(database, EntityMapping.of(entities_of_the_schema(components)), migrations)

@@ -1,7 +1,8 @@
 """The table of the scheduler locks, in snakeboot's own terms: an entity and its repository.
 
-Every application with `[database]` maps it; `make_migration` writes the table into the application's migrations the
-first time, like the table ShedLock's JDBC provider asks for.
+Every application with `[database]` maps it, but its table is part of the schema only once the application has a
+`@scheduler_lock` method: then `make_migration` writes it into the application's migrations, like the table ShedLock's
+JDBC provider asks for once ShedLock is there.
 """
 
 from dataclasses import dataclass
@@ -9,9 +10,10 @@ from datetime import datetime
 from typing import Annotated, Protocol
 
 from snakeboot.data import Column, CrudRepository, Id, entity, query
+from snakeboot.scheduling.scheduler_lock import SCHEDULER_LOCK_ATTRIBUTE
 
 
-@entity("snakeboot_scheduler_lock")
+@entity("snakeboot_scheduler_lock", needed_by=SCHEDULER_LOCK_ATTRIBUTE)
 @dataclass
 class SchedulerLockRecord:
     """One lock of `@scheduler_lock`: held until `lock_until`, since `locked_at`, by `locked_by` (host and process)."""

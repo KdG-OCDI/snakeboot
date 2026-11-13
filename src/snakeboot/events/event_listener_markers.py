@@ -5,6 +5,10 @@ from typing import Any, Final
 
 LISTENER_MAPPING_ATTRIBUTE: Final = "__application_event_listener_mapping__"
 
+APPLICATION_MODULE_LISTENER_ATTRIBUTE: Final = "__application_module_listener_mapping__"
+"""The mark `@application_module_listener` leaves on its method besides the listener's: the mark of a method that needs
+the table of the event publication registry."""
+
 type MethodMarker = Callable[[Callable[..., Any]], Callable[..., Any]]
 
 
@@ -70,7 +74,10 @@ def application_module_listener(*event_types: type) -> MethodMarker:
 
 def _mark(event_types: tuple[type, ...], delivery: Delivery) -> MethodMarker:
     def record(method: Callable[..., Any]) -> Callable[..., Any]:
-        setattr(method, LISTENER_MAPPING_ATTRIBUTE, ListenerMapping(event_types, delivery))
+        mapping = ListenerMapping(event_types, delivery)
+        setattr(method, LISTENER_MAPPING_ATTRIBUTE, mapping)
+        if delivery is Delivery.ASYNC_AFTER_COMMIT:
+            setattr(method, APPLICATION_MODULE_LISTENER_ATTRIBUTE, mapping)
         return method
 
     return record

@@ -419,15 +419,17 @@ def _test_database(
     Without `migrated`, no migration runs, whatever the environment: the database is SQLite in memory with the tables
     of the entities of `context`, made from the entities as for an application without migrations. In a `WebSlice`
     those are snakeboot's own, of the event publication registry and the scheduler locks, which stay in every slice.
+    Either way a table of snakeboot's own is there only when a method of `context` needs it (`entities_of_the_schema`).
     """
     from snakeboot.data import ENTITY_ATTRIBUTE  # noqa: PLC0415  # reason: only an application with a database
     from snakeboot.sqlalchemy_data import Database  # noqa: PLC0415  # reason: as above
+    from snakeboot.sqlalchemy_data.schema_entities import entities_of_the_schema  # noqa: PLC0415  # reason: as above
     from snakeboot.sqlalchemy_data.schema_migrations import migration_locations, migrations_in  # noqa: PLC0415  # reason: as above
     from snakeboot.sqlalchemy_data.testing import in_memory_database, postgresql_database  # noqa: PLC0415  # reason: as above
 
     if Database in overrides:
         return {}
-    entity_types = context.classes_marked(ENTITY_ATTRIBUTE)
+    entity_types = entities_of_the_schema(context)
     if migrated is None:
         return {Database: in_memory_database(entity_types, migrations=())}
     sliced = context.application is not migrated

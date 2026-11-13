@@ -1,7 +1,8 @@
 """The table of the event publication registry, in snakeboot's own terms: an entity and its repository.
 
-Every application with `[database]` maps it; `make_migration` writes the table into the application's migrations the
-first time, like the schema Spring Modulith's JDBC registry asks for.
+Every application with `[database]` maps it, but its table is part of the schema only once the application has an
+`@application_module_listener` method: then `make_migration` writes it into the application's migrations, like the
+schema Spring Modulith's JDBC registry asks for once its starter is there.
 """
 
 from dataclasses import dataclass
@@ -10,11 +11,13 @@ from typing import Annotated, Any, Protocol
 from uuid import UUID
 
 from snakeboot.data import Column, CrudRepository, Id, Index, LockMode, PageRequest, entity, lock
+from snakeboot.events.event_listener_markers import APPLICATION_MODULE_LISTENER_ATTRIBUTE
 
 
 @entity(
     "snakeboot_event_publication",
     indexes=(Index("snakeboot_event_publication_due_idx", "due_at"),),
+    needed_by=APPLICATION_MODULE_LISTENER_ATTRIBUTE,
 )
 @dataclass
 class EventPublicationRecord:

@@ -195,10 +195,10 @@ class TestTheRestLayerOfAnApplicationWhoseMigrationsSQLiteRefuses:
 
         assert health["components"]["database"] == {"status": "UP"}
 
-    def test_its_database_has_only_the_tables_of_snakeboots_own_entities(self) -> None:
+    def test_its_database_has_no_table_since_no_method_of_the_slice_needs_one_of_snakeboots(self) -> None:
         tables = inspect(self.database.engine).get_table_names()
 
-        assert tables == ["snakeboot_event_publication", "snakeboot_scheduler_lock"]
+        assert tables == []
 
 
 def test_a_module_slice_of_that_application_runs_its_migrations_and_names_the_one_sqlite_refuses() -> None:

@@ -224,14 +224,15 @@ class Property:
 
 @dataclass(frozen=True, slots=True)
 class EntityDescription:
-    """What `@entity` declared: the class, its table, its properties in field order, its identifier, its indexes and
-    its unique constraints."""
+    """What `@entity` declared: the class, its table, its properties in field order, its identifier, its indexes, its
+    unique constraints, and the mark of the methods without which its table is no part of the schema."""
 
     entity_type: type
     table: str
     properties: tuple[Property, ...]
     indexes: tuple[Index, ...]
     unique_constraints: tuple[UniqueConstraint, ...]
+    needed_by: str | None = None
 
     @property
     def identifier(self) -> Property:
@@ -249,7 +250,11 @@ class EntityDescription:
 
 
 def entity[C: type](
-    table: str, *, indexes: tuple[Index, ...] = (), unique_constraints: tuple[UniqueConstraint, ...] = ()
+    table: str,
+    *,
+    indexes: tuple[Index, ...] = (),
+    unique_constraints: tuple[UniqueConstraint, ...] = (),
+    needed_by: str | None = None,
 ) -> Callable[[C], C]:
     """Declares a dataclass whose objects a table keeps, like JPA's `@Entity` with `@Table(name = table, indexes = ...,
     uniqueConstraints = ...)`.
@@ -271,10 +276,18 @@ def entity[C: type](
     to another entity's table. The class knows no persistence framework, so a domain or an adapter keeps it free of
     one. It is a plain, mutable dataclass: the persistence framework sets its fields. Everything is checked here, when
     the module is imported; that a foreign key refers to an entity's table, when the application starts.
+
+    `needed_by` is for the table of a library, which an application needs only when it uses what the table is for:
+    the mark a decorator leaves on the methods that use it. The table is part of the schema (what the migrations must
+    build in a test, what `make_migration` writes) only when a method of the application carries that mark, as a
+    starter's table comes with its starter in Spring Boot. snakeboot's own tables declare it: the event publication
+    registry's is needed by `@application_module_listener` methods, the scheduler locks' by `@scheduler_lock` ones.
     """
 
     def declare(entity_type: C) -> C:
-        description = _describe(entity_type, table, indexes=indexes, unique_constraints=unique_constraints)
+        description = _describe(
+            entity_type, table, indexes=indexes, unique_constraints=unique_constraints, needed_by=needed_by
+        )
         setattr(entity_type, ENTITY_ATTRIBUTE, description)
         return entity_type
 
@@ -290,7 +303,12 @@ def description_of(entity_type: type) -> EntityDescription:
 
 
 def _describe(
-    entity_type: type, table: str, *, indexes: tuple[Index, ...], unique_constraints: tuple[UniqueConstraint, ...]
+    entity_type: type,
+    table: str,
+    *,
+    indexes: tuple[Index, ...],
+    unique_constraints: tuple[UniqueConstraint, ...],
+    needed_by: str | None,
 ) -> EntityDescription:
     if not dataclasses.is_dataclass(entity_type):
         raise InvalidEntityError(f"@entity marks a dataclass: put @dataclass under @entity on {entity_type.__name__}.")
@@ -301,7 +319,7 @@ def _describe(
         )
     hints = typing.get_type_hints(entity_type, include_extras=True)
     properties = tuple(_property(field.name, hints[field.name]) for field in dataclasses.fields(entity_type))
-    description = EntityDescription(entity_type, table, properties, indexes, unique_constraints)
+    description = EntityDescription(entity_type, table, properties, indexes, unique_constraints, needed_by)
     _refuse_wrong_identifiers(description)
     _refuse_wrong_versions(description)
     _refuse_wrong_auditors(description)

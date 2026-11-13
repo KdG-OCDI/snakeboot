@@ -3,6 +3,20 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.13,<0.14`.
 
+## 0.13.2
+
+- A table of snakeboot's own is part of the schema only once a method needs it, as a starter's table in Spring Boot:
+  `snakeboot_event_publication` once the application has an `@application_module_listener`,
+  `snakeboot_scheduler_lock` once it has a `@scheduler_lock`. In 0.13.0 and 0.13.1 the database of every
+  `@application_test` demanded both of every application with `[database]`, so one without those methods, whose
+  migrations rightly lack them, stopped every test with `The migrations do not build the tables of the entities`;
+  and `make_migration` wrote them into its first migration whether it needed them or not. Spring Boot has no
+  `event_publication` or `shedlock` table before Spring Modulith's or ShedLock's starter either. Migrations that do
+  create them still may: a table no entity needs is left alone.
+- `@entity(..., needed_by=...)` names the mark of the methods that need a library's table, which snakeboot's own
+  tables use (`APPLICATION_MODULE_LISTENER_ATTRIBUTE`, which `@application_module_listener` now leaves besides the
+  listener's mark, and `SCHEDULER_LOCK_ATTRIBUTE`); `EntityDescription` has the field `needed_by` (None by default).
+
 ## 0.13.1
 
 - `Version()` documents its form for a `NOT NULL` column, as in a schema another tool made:

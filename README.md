@@ -319,8 +319,10 @@ down or rolling it back. With `[database]` the publisher's transaction also writ
 listener failed, or whose process stopped first, is delivered again (after 30 seconds, then longer, ten times at most),
 so the event arrives at least once and the listener must bear receiving it twice. What keeps failing waits in the
 table, with its last failure, for a person; the gauge `snakeboot_event_publications_incomplete` shows how many wait.
-The event is kept as JSON, so it is a dataclass or a Pydantic model; another type stops the start. `make_migration`
-writes the table into the application's migrations the first time. The optional table `[events]` sets the timing,
+The event is kept as JSON, so it is a dataclass or a Pydantic model; another type stops the start. The table belongs
+to the schema once the application has an `@application_module_listener`, as Spring Modulith's `event_publication`
+comes with its starter: `make_migration` then writes it into the application's migrations, and the tests check that
+they build it; an application without one needs no such table. The optional table `[events]` sets the timing,
 like Spring Modulith's `spring.modulith.events.*`; without it, the values below hold.
 
 ```toml
@@ -485,7 +487,9 @@ rate or a fixed delay, on one thread. A method that raises is logged and runs ag
 `[scheduling] auto_startup = false` keeps a process from running them. Every replica runs its own scheduler;
 `@scheduler_lock`, like ShedLock's `@SchedulerLock`, lets the replica that takes the lock run a turn and the others
 skip it. The lock is a row of `snakeboot_scheduler_lock` in the database, held for at most `at_most_for` (the lock of
-a process that died frees itself) and at least `at_least_for`.
+a process that died frees itself) and at least `at_least_for`. Like ShedLock's `shedlock`, the table belongs to the
+schema once a method has `@scheduler_lock`: `make_migration` then writes it, and an application without one needs
+none.
 
 ```python
 @scheduled(fixed_rate=timedelta(hours=1))
