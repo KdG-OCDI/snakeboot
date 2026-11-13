@@ -18,7 +18,9 @@ class MigrateCommand(CommandLineRunner, command="migrate"):
     """Brings the database's schema up to date, like Flyway's migrate.
 
     Runs every SQL migration of the application's entities that the database has not run, in version order, each in
-    a transaction of its own. A script that changed after it ran stops the command.
+    a transaction of its own. A script that changed after it ran stops the command. With [database] baseline_version,
+    a database that holds tables but no history of migrations first records the migrations up to that version as run,
+    without running them, like Flyway's baselineOnMigrate.
     """
 
     def __init__(self, migrations: SchemaMigrations) -> None:
@@ -26,10 +28,12 @@ class MigrateCommand(CommandLineRunner, command="migrate"):
 
     @override
     def run(self, arguments: Namespace) -> None:
-        applied = self._migrations.migrate()
-        for migration in applied:
+        result = self._migrations.migrate()
+        for migration in result.baselined:
+            sys.stdout.write(f"Baselined {migration.path.name}: recorded as run, without running it\n")
+        for migration in result.applied:
             sys.stdout.write(f"Applied {migration.path.name}\n")
-        if not applied:
+        if not result.applied:
             sys.stdout.write("The schema is up to date.\n")
 
 

@@ -11,7 +11,9 @@ from snakeboot.application.logging_configuration import configure_logging
 from snakeboot.configuration import LoggingProperties, ServerProperties
 from snakeboot.tracing import TraceContext
 
-SERVER = ServerProperties(host="127.0.0.1", port=8000, workers=1, debug=False, allowed_hosts=("*",), log_level="INFO")
+SERVER = ServerProperties(
+    host="127.0.0.1", port=8000, workers=1, debug=False, allowed_hosts=("*",), log_level="INFO", max_upload_size=None
+)
 CALLER = "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01"
 
 

@@ -56,9 +56,11 @@ def repository_operations(database: Database, mapping: EntityMapping) -> Reposit
 
 
 @injectable
-def schema_migrations(database: Database, mapping: EntityMapping) -> SchemaMigrations:
-    """Provides the SQL migrations in the migrations directories next to the entities."""
-    return SchemaMigrations(database, migrations_in(migration_locations(mapping.entity_types)))
+def schema_migrations(database: Database, mapping: EntityMapping, properties: DatabaseProperties) -> SchemaMigrations:
+    """Provides the SQL migrations in the migrations directories next to the entities, with the baseline of
+    `[database] baseline_version` for a database whose schema was made before them."""
+    migrations = migrations_in(migration_locations(mapping.entity_types))
+    return SchemaMigrations(database, migrations, baseline_version=properties.baseline_version)
 
 
 @injectable

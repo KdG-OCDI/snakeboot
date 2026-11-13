@@ -38,13 +38,30 @@ if TYPE_CHECKING:
     from httpx2 import Response
     from starlette.testclient import TestClient
 
-__all__ = ["LocalServer", "RestClient", "RestResponse", "ServerClient", "TestApplication"]
+__all__ = ["SPY", "LocalServer", "RestClient", "RestResponse", "ServerClient", "TestApplication"]
 
 type RestClient = TestClient
 """The client of `TestApplication.client()`: `get`, `post`, `put`, `patch` and `delete` return a `RestResponse`."""
 
 type RestResponse = Response
 """An answer of the REST API to a test: `status_code`, `headers`, `json()` and `text`."""
+
+
+class SpyMarker:
+    """The type of `SPY`, which asks `TestApplication.start` for a spy around a component instead of a double."""
+
+    @override
+    def __repr__(self) -> str:
+        return "SPY"
+
+
+SPY: Final = SpyMarker()
+"""The double of a type in `TestApplication.start(overrides=...)` that wraps the application's own component in a spy,
+like `@MockitoSpyBean`: `overrides={PaymentPort: SPY}`, then `verify(app.get(PaymentPort).charge)`.
+
+The spy replaces the component before anything that depends on it is built, the event listeners included, so it
+records their calls too. A `SpyComponent[T]` of an `@application_test` passes it.
+"""
 
 
 class TestApplication:
@@ -56,10 +73,11 @@ class TestApplication:
             assert app.get(GameRecords).count() == 0               # any component of the container
 
     The application starts as it does for real, from its application.toml and the active profile, with these
-    differences: `overrides` replace components with doubles; with `[database]` the database is a fresh SQLite in
-    memory that the application's migrations built and that was checked against the entities, as Spring Boot's tests
-    run Flyway on H2 with `ddl-auto=validate` (without migrations, the tables of the entities), or a copy of a
-    PostgreSQL that the migrations built (`TestEnvironment.database`); with `[cache]` the cache is an `InMemoryCache`;
+    differences: `overrides` replace components with doubles, or wrap them in a spy (`SPY`); with `[database]` the
+    database is a fresh SQLite in memory that the application's migrations built and that was checked against the
+    entities, as Spring Boot's tests run Flyway on H2 with `ddl-auto=validate` (without migrations, the tables of the
+    entities), or a copy of a PostgreSQL that the migrations built (`TestEnvironment.database`); with `[cache]` the
+    cache is an `InMemoryCache`;
     with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own `@rabbit_listener` methods,
     without a broker (`InProcessRabbitTemplate`); the `@application_module_listener` methods run on the caller's
     thread, so what they did is there when the call that published returns; every event is kept in
@@ -98,9 +116,10 @@ class TestApplication:
         """Starts `application` with `overrides`, in `environment`: by default without a profile and in memory.
 
         `test_components` replace the components the application has, unless `overrides` replaces the same; for an
-        application without one of them, it does nothing. `only` starts part of the application, a `WebSlice` or a
-        `ModuleSlice`: then `overrides` join the container, standing in for what the slice leaves out, and a
-        dependency nobody gave stops the start with its name.
+        application without one of them, it does nothing. A type that `overrides` maps to `SPY` gets a spy around its
+        component, the test component included, before the listeners are built. `only` starts part of the
+        application, a `WebSlice` or a `ModuleSlice`: then `overrides` join the container, standing in for what the
+        slice leaves out, and a dependency nobody gave stops the start with its name.
         """
         environment = environment or TestEnvironment()
         context = ApplicationContext.of(
@@ -109,9 +128,11 @@ class TestApplication:
             profile=environment.profile,
             properties=environment.properties,
         )
-        explicit = dict(overrides or {})
+        overrides = overrides or {}
+        explicit = {component_type: double for component_type, double in overrides.items() if double is not SPY}
+        spied = tuple(component_type for component_type, double in overrides.items() if double is SPY)
         services = _test_services(context, environment, explicit, application=application)
-        doubles = _Doubles(services, explicit, joining=only is not None)
+        doubles = _Doubles(services, explicit, joining=only is not None, spied=spied)
         try:
             return cls._started(context, doubles=doubles, test_components=test_components)
         except WireupError as error:
@@ -157,6 +178,8 @@ class TestApplication:
 
         The spy does what the component does and records its calls, for `verify(...)`; `when(...)` changes what a
         method answers. Components built before keep the component itself, so a test spies before its first call.
+        The event listeners are built while the application starts, so they keep it too: to record what they call,
+        `start` the application with `overrides={component_type: SPY}`, as a `SpyComponent` does.
         """
         component = self.get(component_type)
         spy = Mock(spec=component, wraps=component)
@@ -215,13 +238,22 @@ class TestApplication:
         test_components: Mapping[Any, object] | None,
     ) -> Self:
         extras, additions = _test_extras(context)
-        context.refresh(doubles.replacing(), additions=[*additions, *doubles.joining_the_container()])
         replacements = {**doubles.services, **doubles.explicit}
-        replacements |= _replaced_where_present(context, test_components or {}, replacements)
         # What the test made for itself, it closes: the database of a test drops its PostgreSQL copy.
         started = cls(context, replacements, extras=extras, owned=list(doubles.services.values()))
-        started._accept_signed_in_tokens()
+        context.refresh(
+            doubles.replacing(),
+            additions=[*additions, *doubles.joining_the_container()],
+            prepare=lambda _: started._prepare(test_components or {}, doubles.spied),
+        )
         return started
+
+    def _prepare(self, test_components: Mapping[Any, object], spied: Sequence[Any]) -> None:
+        # Before the listeners are built, so that they receive the test components and the spies too.
+        self._replacements |= _replaced_where_present(self._context, test_components, self._replacements)
+        self._accept_signed_in_tokens()
+        for component_type in spied:
+            self.spy(component_type)
 
     def _asgi_application(self, *, also_allowed_hosts: tuple[str, ...] = ()) -> LifecycleAsgiApplication:
         api = web_api(self._context, also_allowed_hosts=also_allowed_hosts)
@@ -271,11 +303,13 @@ _SLICE_HINT: Final = (
 
 @dataclass(frozen=True, slots=True)
 class _Doubles:
-    """What a test puts in place of the application's own: its infrastructure, made here, and its own doubles."""
+    """What a test puts in place of the application's own: its infrastructure, made here, its own doubles, and the
+    types whose component it wraps in a spy."""
 
     services: Mapping[Any, object]
     explicit: Mapping[Any, object]
     joining: bool
+    spied: tuple[Any, ...] = ()
 
     def replacing(self) -> dict[Any, object]:
         """What replaces a component of the container: in a slice, the test's doubles join it instead."""

@@ -27,6 +27,7 @@ from snakeboot.configuration import (
     begin_configuration,
     sections_declared_in,
 )
+from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.transaction import TransactionManager, TransactionManagerRegistry
 
@@ -58,7 +59,8 @@ class ApplicationContext(ApplicationComponents):
     `of` reads the configuration and finds the modules of the application without building anything, so a command's
     `--help` answers at once; `refresh` imports the modules, reads every section they declare and builds wireup's
     container, like Spring's `refresh()`; `start` does both. With a `[database]` table, `refresh` installs the
-    transaction manager of `@transactional` that the container provides.
+    transaction manager of `@transactional` that the container provides; then it builds every event listener and
+    registers it with the publisher, so a listener may depend on a use case that publishes events.
 
     The context knows no framework: the binding that starts the application (`snakeboot.boot`) says which module
     joins the container for which table (`conditional`), and publishes the components it builds.
@@ -113,13 +115,23 @@ class ApplicationContext(ApplicationComponents):
         """Tells whether `refresh` built the container."""
         return self._container is not None
 
-    def refresh(self, overrides: Mapping[Any, object] | None = None, *, additions: Sequence[object] = ()) -> None:
-        """Imports the modules, reads every section they declare, builds the container and installs the transactions.
+    def refresh(
+        self,
+        overrides: Mapping[Any, object] | None = None,
+        *,
+        additions: Sequence[object] = (),
+        prepare: Callable[[Self], None] | None = None,
+    ) -> None:
+        """Imports the modules, reads every section they declare, builds the container, installs the transactions and
+        registers the event listeners.
 
         `overrides` replace components before anything is built, as a test replaces a port with a double or the
         database with one in memory. `additions` are wireup's injectables that join the container besides the
-        modules, as a test adds a listener that records every event. A missing value, an unknown table or a
-        dependency the container cannot satisfy stops the start here.
+        modules, as a test adds a listener that records every event. `prepare` runs on the built container before the
+        listeners are built, like Spring's `BeanFactoryPostProcessor`, as a test replaces the components it finds
+        there. Then every `@application_event_listener` is built and registered with the publisher, like Spring's
+        `EventListenerMethodProcessor` once every singleton exists. A missing value, an unknown table, a dependency
+        the container cannot satisfy or a listener that cannot be built stops the start here, and closes the context.
         """
         modules = [import_module(name) for name in self._module_names()]
         self.configuration.complete(*(section for module in modules for section in sections_declared_in(module)))
@@ -132,10 +144,11 @@ class ApplicationContext(ApplicationComponents):
             ],
             config={CONFIGURATION_KEY: self.configuration},
         )
-        for component_type, replacement in (overrides or {}).items():
-            self.replace_component(component_type, replacement)
-        if DatabaseProperties in self.configuration.sections:
-            TransactionManagerRegistry.install(self.get(TransactionManager))
+        try:
+            self._finish_refresh(overrides or {}, prepare)
+        except BaseException:
+            self.close()
+            raise
 
     def replace_component(self, component_type: Any, replacement: object) -> None:
         """Replaces the component of `component_type` in the built container, as a test replaces a port with a double.
@@ -176,6 +189,25 @@ class ApplicationContext(ApplicationComponents):
         except WireupError as error:
             raise LookupError(f"The container has no {name}: {error}") from error
         return component
+
+    def _finish_refresh(self, overrides: Mapping[Any, object], prepare: Callable[[Self], None] | None) -> None:
+        for component_type, replacement in overrides.items():
+            self.replace_component(component_type, replacement)
+        if DatabaseProperties in self.configuration.sections:
+            TransactionManagerRegistry.install(self.get(TransactionManager))
+        if prepare is not None:
+            prepare(self)
+        self._register_listeners()
+
+    def _register_listeners(self) -> None:
+        # The publisher depends on no listener, so a listener may inject a use case that publishes; building them all
+        # here, while the application starts, stops it on a listener that cannot be built instead of the first event.
+        try:
+            processor = self.get(EventListenerMethodProcessor)
+        except Exception as error:
+            error.add_note("Raised while the application started and built its event listeners.")
+            raise
+        processor.register_listeners()
 
     def _module_names(self) -> list[str]:
         # The sections of snakeboot are declared outside the scan: their modules hold their providers.

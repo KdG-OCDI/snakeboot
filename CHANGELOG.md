@@ -47,6 +47,70 @@ a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
 - `in_memory_database(entity_types, migrations=...)` returns a database on that schema, `in_memory_database()` an
   empty one as before; `postgresql_database(image, entity_types, migrations=...)` runs the migrations given.
 - A test that replaces the `Database` with its own gets it as it gave it: snakeboot creates no tables in it.
+- A database whose schema was made before its migrations is baselined (#12), like Flyway's `baseline-on-migrate`
+  with `baseline-version`: with the optional `[database] baseline_version = 1`, `migrate` finds tables but no history
+  of migrations (or an empty one), records V1 and every migration before it as run without running them, and prints
+  `Baselined V1__...sql`; then it runs the later ones. A fresh database runs every migration, the in-memory and
+  PostgreSQL databases of the tests included, and a database with a history is never baselined. A baselined row keeps
+  the checksum `baseline`, which is never compared with the script, as Flyway skips its baseline row. A
+  `baseline_version` that names no migration stops `migrate`; without the key nothing changes, except that a first
+  migration that fails on tables made before the migrations says to set `baseline_version`.
+  `SchemaMigrations.migrate()` returns a `MigrateResult` (`baselined`, `applied`) instead of the list it ran.
+- On PostgreSQL, `migrate` resets the session's settings after every script (`RESET ALL`). A script as `pg_dump`
+  writes it begins with `set_config('search_path', '', false)`, after which neither the history row nor the next
+  script found its tables.
+- An endpoint receives an uploaded file (#10), like Spring's `MultipartFile`: a parameter of type `UploadedFile`
+  (`filename`, `content_type`, `size`, `content`) is filled from the part of the same name of a `multipart/form-data`
+  form, whose other fields fill the endpoint's other parameters outside the path. The OpenAPI document shows the
+  form, with a file picker in Swagger UI. `snakeboot[web]` brings python-multipart for it.
+- The optional key `[server] max_upload_size`, like `spring.servlet.multipart.max-file-size`: a number of bytes or a
+  size such as "20MB" or "20MiB"; without it, 1 MiB, Spring Boot's default. A larger file never reaches the endpoint:
+  it raises `UploadTooLargeError`, which an advice answers, and without one the API answers 413
+  `{"code": "upload_too_large", "detail": ...}`. An `application.toml` without the key needs no change; code that
+  builds a `ServerProperties` itself passes `max_upload_size=None`, as it passes `retry=None` to
+  `RabbitListenerProperties`.
+- An endpoint answers with a file (#11), like Spring's `ResponseEntity<Resource>`: it returns
+  `FileDownload(content, media_type, filename=..., inline=...)`, and the answer holds the bytes, the media type as
+  `Content-Type` and `Content-Disposition: attachment` (or `inline`) with the file name, in UTF-8 in `filename*` when
+  it is not plain ASCII and as near as ASCII gets in `filename` (RFC 6266), and `X-Content-Type-Options: nosniff`.
+  `@route.get(..., produces="application/pdf")`, like `@GetMapping(produces = ...)`, names the media type in the
+  OpenAPI document, which shows a binary answer (of any media type without it). With `[cors]` the script of an allowed
+  page may read `Content-Disposition`.
+- The start stops on an `UploadedFile` that is not one plain parameter (a list, an optional file, a default), on an
+  upload on a GET or DELETE, and on `produces` on an endpoint that answers with something else than a `FileDownload`.
+- An entity describes the unique constraints and indexes of an existing schema with their own names (#7), so
+  `make_migration` and the schema checks of the tests no longer propose to drop them: `@entity(..., unique_constraints=(UniqueConstraint(name,
+  *columns),))`, like JPA's `@UniqueConstraint`, and `Index(name, *columns, unique=True, where="...")`, a unique
+  index, partial with `where` (whose condition the schema checks leave alone). On PostgreSQL a unique constraint
+  (Django's `UniqueConstraint`) and a unique index (one with a `condition`) are different objects: each compares
+  equal to the one the entity declares, and not to the other.
+- `ForeignKey("funding_call.id", on_delete="cascade", name="...", deferred=True)` on a column, like `@JoinColumn`
+  with `@ForeignKey` and Hibernate's `@OnDelete` (#8). `make_migration` writes it, and the schema check on PostgreSQL
+  compares its columns, its target, its `ON DELETE` and whether it is `DEFERRABLE INITIALLY DEFERRED` (as Django
+  declares every foreign key there), but not its name. The database in memory of a test enforces it as production
+  does, since SQLite's foreign keys are on: deleting a row cascades, or is refused while rows refer to it. There are
+  no relationships: a repository loads the rows that refer to another. The column it refers to is an entity's of the
+  same application, or of the same slice in a test; another stops the start (`InvalidEntityError`), as does
+  `on_delete="set null"` on a field that is never empty.
+- `Annotated[int, BigInt()]` and `Annotated[int, SmallInt()]` make a BIGINT and a SMALLINT, like Java's `long` and
+  `short` (#9): an amount past 2,147,483,647 fits, and Django's `BigIntegerField` and `SmallIntegerField` compare
+  equal instead of being altered to INTEGER. SQLite keeps every whole number alike.
+- A listener may inject a use case that publishes events (#13), as a listener between two bounded contexts does:
+  listener -> use case -> `ApplicationEventPublisher` -> every listener was a cycle that stopped the start, and the
+  way out was a lookup in the `ApplicationContext` when the event arrived. As in Spring, the publisher now depends on
+  no listener: it keeps them in an `ApplicationEventListenerRegistry`, and `ApplicationContext.refresh` builds every
+  `@application_event_listener` once the container is built and registers it (`EventListenerMethodProcessor`, like
+  Spring's), so a listener that cannot be built still stops the start, not the first event. A start that fails closes
+  the context it began. `ApplicationEventPublisher.register(listeners)` adds listeners, and
+  `refresh(..., prepare=...)` replaces components before the listeners are built, as `TestApplication` does with the
+  `@test_component`s and the spies, which therefore reach the listeners. **Breaking:** a wireup container built
+  without `ApplicationContext` registers its listeners itself, with
+  `get(EventListenerMethodProcessor).register_listeners()`.
+- `SPY` (`snakeboot.boot.testing`) as the double of a type in `TestApplication.start(overrides=...)` wraps the
+  application's own component in a spy before anything that depends on it is built, like `@MockitoSpyBean`, so the
+  spy records what a listener calls too: `overrides={PaymentPort: SPY}`. A `SpyComponent` of an `@application_test`
+  passes it. `TestApplication.spy(T)` after the start still spies on what is built later, but not for the listeners,
+  which were built when the application started.
 
 ## 0.12.0
 

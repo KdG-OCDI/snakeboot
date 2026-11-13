@@ -8,7 +8,8 @@ from datetime import UTC, datetime
 from pathlib import Path
 from typing import Final
 
-from sqlalchemy import Column, Connection, MetaData, String, Table, select, text
+from sqlalchemy import Column, Connection, MetaData, String, Table, inspect, select, text
+from sqlalchemy.exc import DBAPIError
 
 from snakeboot.sqlalchemy_data.database import Database
 from snakeboot.sqlalchemy_data.entity_mapping import AwareDateTime
@@ -24,6 +25,14 @@ HISTORY_TABLE: Final = "snakeboot_schema_history"
 
 MIGRATION_FILE: Final = re.compile(r"V(?P<version>\d+(?:_\d+)*)__(?P<description>[A-Za-z0-9_]+)\.sql")
 """`V1__create_games.sql`, `V2_1__add_an_index.sql`: a version, two underscores, a description, as in Flyway."""
+
+BASELINE_CHECKSUM: Final = "baseline"
+"""The checksum the history keeps for a migration that a baseline recorded without running it.
+
+Like the row of Flyway's baseline, it is never compared with the script: the check guards that the script a database
+ran is still the one in the repository, and the database ran no baselined script. So the script of the schema a
+database already held (`pg_dump --schema-only`, say) may still be corrected for the fresh databases that do run it.
+"""
 
 _MIGRATION_LOCK: Final = 4_242_424_242
 """PostgreSQL's advisory lock that keeps two processes from migrating one database at the same time."""
@@ -41,7 +50,8 @@ _HISTORY: Final = Table(
 
 class InvalidMigrationError(RuntimeError):
     """Raised when the migrations cannot run: a name that is no version, two scripts for one version, a script that
-    changed after it ran, or a version the database ran that no script has."""
+    changed after it ran, a version the database ran that no script has, a baseline that names no migration, or a
+    first migration that fails on tables made before the migrations, without a baseline."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -66,6 +76,15 @@ class Migration:
     def checksum(self) -> str:
         """The SHA-256 of the script: a script that changed after it ran stops the next `migrate`."""
         return hashlib.sha256(self.sql.encode()).hexdigest()
+
+
+@dataclass(frozen=True, slots=True)
+class MigrateResult:
+    """What one `migrate` did, like Flyway's `MigrateResult`: the migrations it recorded as run without running them,
+    as a baseline, and the migrations it ran, each by version."""
+
+    baselined: tuple[Migration, ...]
+    applied: tuple[Migration, ...]
 
 
 LIBRARY_PACKAGE: Final = "snakeboot"
@@ -104,11 +123,19 @@ class SchemaMigrations:
     Each script runs once, in version order, in a transaction of its own, and the history table remembers it with its
     checksum. On PostgreSQL an advisory lock lets one process migrate while another waits, so two replicas that start
     together do not both run a script.
+
+    With `baseline_version`, like Flyway's `baselineOnMigrate`, a database whose schema was made before its
+    migrations (tables, but no history, or an empty one) is baselined first: every migration up to and including that
+    version is recorded as run, without running it, and only the later ones run. A database with a history is never
+    baselined, and an empty one runs every migration, so a fresh database gets the same schema from the scripts.
     """
 
-    def __init__(self, database: Database, migrations: Sequence[Migration]) -> None:
+    def __init__(
+        self, database: Database, migrations: Sequence[Migration], *, baseline_version: str | None = None
+    ) -> None:
         self._database = database
         self._migrations = migrations
+        self._baseline = _baseline_named(baseline_version, migrations)
 
     @property
     def migrations(self) -> Sequence[Migration]:
@@ -120,17 +147,30 @@ class SchemaMigrations:
         with self._database.engine.connect() as connection:
             return self._checked_pending(connection)
 
-    def migrate(self) -> list[Migration]:
-        """Runs every pending migration and returns them; a failing script stops the run and leaves no trace."""
+    def migrate(self) -> MigrateResult:
+        """Baselines a database that holds tables but no history, when `baseline_version` asks for it, then runs every
+        pending migration; a failing script stops the run and leaves no trace."""
         with self._database.engine.connect() as connection:
             self._lock(connection)
+            tables_without_history = _holds_tables_without_history(connection)
+            baselined = self._record_baseline(connection) if tables_without_history else []
             pending = self._checked_pending(connection)
             for migration in pending:
-                with connection.begin():
-                    _execute_script(connection, migration.sql)
-                    connection.execute(_HISTORY.insert().values(_history_row(migration)))
-                logger.info("Applied migration V%s__%s", migration.label, migration.description)
-            return pending
+                first_on_older_tables = tables_without_history and not baselined and migration is pending[0]
+                _apply(connection, migration, naming_the_baseline=first_on_older_tables)
+            return MigrateResult(tuple(baselined), tuple(pending))
+
+    def _record_baseline(self, connection: Connection) -> list[Migration]:
+        if self._baseline is None:
+            return []
+        baselined = [migration for migration in self._migrations if migration.version <= self._baseline.version]
+        rows = [_history_row(migration, BASELINE_CHECKSUM) for migration in baselined]
+        with connection.begin():
+            _HISTORY.create(connection, checkfirst=True)
+            connection.execute(_HISTORY.insert(), rows)
+        for migration in baselined:
+            logger.info("Baselined migration V%s__%s, without running it", migration.label, migration.description)
+        return baselined
 
     def _checked_pending(self, connection: Connection) -> list[Migration]:
         with connection.begin():
@@ -147,21 +187,61 @@ class SchemaMigrations:
             connection.commit()
 
 
+def _baseline_named(version: str | None, migrations: Sequence[Migration]) -> Migration | None:
+    if version is None:
+        return None
+    named = next((migration for migration in migrations if migration.label == version), None)
+    if named is None:
+        versions = ", ".join(migration.label for migration in migrations) or "none"
+        raise InvalidMigrationError(
+            f'[database] baseline_version = "{version}" names no migration (the versions are: {versions}). The '
+            "baseline is the version of the migration that holds the schema the database already has."
+        )
+    return named
+
+
+def _holds_tables_without_history(connection: Connection) -> bool:
+    # Flyway baselines only where the history table does not exist. Here an empty one counts as none: a first migrate
+    # without the baseline leaves one behind, and the next, with the baseline its failure asks for, must baseline.
+    with connection.begin():
+        tables = set(inspect(connection).get_table_names())
+        if not tables - {HISTORY_TABLE}:
+            return False
+        return HISTORY_TABLE not in tables or connection.execute(select(_HISTORY.c.version).limit(1)).first() is None
+
+
+def _apply(connection: Connection, migration: Migration, *, naming_the_baseline: bool) -> None:
+    try:
+        with connection.begin():
+            _execute_script(connection, migration.sql)
+            connection.execute(_HISTORY.insert().values(_history_row(migration, migration.checksum)))
+    except DBAPIError as error:
+        if not naming_the_baseline:
+            raise
+        raise InvalidMigrationError(
+            f"{migration.path.name} failed on a database that already held tables, but no history of migrations: "
+            f"{error.orig}\n\nWhen those tables are a schema made before the migrations, by another tool or by hand, "
+            "set [database] baseline_version to the version of the migration that holds that schema: migrate then "
+            "records that migration, and every one before it, as run without running them, and runs the later ones."
+        ) from error
+    logger.info("Applied migration V%s__%s", migration.label, migration.description)
+
+
 def _refuse_unknown_or_changed(version: str, checksum: str, migration: Migration | None) -> None:
     if migration is None:
         raise InvalidMigrationError(f"The database ran migration {version}, which no migrations directory holds.")
-    if migration.checksum != checksum:
+    if checksum not in {BASELINE_CHECKSUM, migration.checksum}:
         raise InvalidMigrationError(
             f"{migration.path} changed after it ran: write a new migration instead of changing one that ran."
         )
 
 
-def _history_row(migration: Migration) -> dict[str, object]:
+def _history_row(migration: Migration, checksum: str) -> dict[str, object]:
     return {
         "version": migration.label,
         "description": migration.description,
         "script": migration.path.name,
-        "checksum": migration.checksum,
+        "checksum": checksum,
         "installed_on": datetime.now(UTC),
     }
 
@@ -174,3 +254,6 @@ def _execute_script(connection: Connection, sql: str) -> None:
             connection.exec_driver_sql(statement)
     else:
         connection.exec_driver_sql(sql)
+        # A script from pg_dump begins by emptying search_path for the rest of the session: back to the defaults, so
+        # the history row lands where the history was read, and no setting of one script leaks into the next.
+        connection.exec_driver_sql("RESET ALL")

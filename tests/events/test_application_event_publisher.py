@@ -15,7 +15,11 @@ from snakeboot.events import (
     event_listener,
     transactional_event_listener,
 )
-from snakeboot.events.application_event_publisher_injectable import application_event_publisher
+from snakeboot.events.application_event_publisher_injectable import (
+    application_event_publisher,
+    event_listener_method_processor,
+)
+from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.testing import RecordingTransactionManager
 from snakeboot.transaction import TransactionManagerRegistry, transactional
 
@@ -177,7 +181,9 @@ def test_a_broken_listener_stops_the_start_up(listener: object, message: str) ->
         ApplicationEventPublisher([listener])
 
 
-def test_wireup_hands_every_listener_to_the_publisher(transaction_manager: RecordingTransactionManager) -> None:
+def test_the_start_up_hands_every_listener_wireup_knows_to_the_publisher(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
     diary = Diary()
 
     @injectable
@@ -185,11 +191,93 @@ def test_wireup_hands_every_listener_to_the_publisher(transaction_manager: Recor
         return diary
 
     container = wireup.create_sync_container(
-        injectables=[shared_diary, application_event_publisher, ImmediateListener, AfterCommitListener]
+        injectables=[
+            shared_diary,
+            application_event_publisher,
+            event_listener_method_processor,
+            ImmediateListener,
+            AfterCommitListener,
+        ]
     )
+    container.get(EventListenerMethodProcessor).register_listeners()
     container.get(ApplicationEventPublisher).publish(SomethingHappened("wired"))
 
     assert sorted(diary.entries) == ["after commit: wired", "at once: wired"]
+
+
+@dataclass(frozen=True)
+class SomethingFollowedUp:
+    what: str
+
+
+@injectable
+class FollowUpUseCase:
+    """Publishes an event of its own: what a listener between two bounded contexts calls."""
+
+    def __init__(self, events: ApplicationEventPublisher) -> None:
+        self._events = events
+
+    def execute(self, what: str) -> None:
+        self._events.publish(SomethingFollowedUp(what))
+
+
+@application_event_listener
+class FollowingUpListener:
+    """Depends on a use case that depends on the publisher: a cycle while the publisher took every listener."""
+
+    def __init__(self, follow_up: FollowUpUseCase) -> None:
+        self._follow_up = follow_up
+
+    @event_listener(SomethingHappened)
+    def follow_up(self, event: SomethingHappened) -> None:
+        self._follow_up.execute(event.what)
+
+
+@application_event_listener
+class FollowUpListener:
+    def __init__(self, diary: Diary) -> None:
+        self._diary = diary
+
+    @event_listener(SomethingFollowedUp)
+    def write_down(self, event: SomethingFollowedUp) -> None:
+        self._diary.entries.append(f"followed up: {event.what}")
+
+
+def test_a_listener_may_depend_on_a_use_case_that_publishes_events() -> None:
+    """Regression (#13): wireup refused to build listener -> use case -> publisher -> every listener."""
+    diary = Diary()
+
+    @injectable
+    def shared_diary() -> Diary:
+        return diary
+
+    container = wireup.create_sync_container(
+        injectables=[
+            shared_diary,
+            application_event_publisher_injectable,
+            FollowUpUseCase,
+            FollowingUpListener,
+            FollowUpListener,
+        ]
+    )
+    container.get(EventListenerMethodProcessor).register_listeners()
+    container.get(ApplicationEventPublisher).publish(SomethingHappened("deadline confirmed"))
+
+    assert diary.entries == ["followed up: deadline confirmed"]
+    container.close()
+
+
+def test_the_publisher_knows_no_listener_until_the_start_up_registers_them_and_registers_them_once() -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher()
+    processor = EventListenerMethodProcessor(publisher, [ImmediateListener(diary)])
+
+    publisher.publish(SomethingHappened("before the start-up"))
+    processor.register_listeners()
+    processor.register_listeners()
+    publisher.publish(SomethingHappened("after it"))
+
+    assert diary.entries == ["at once: after it"]
 
 
 def test_an_application_without_listeners_starts_and_publishing_tells_nobody() -> None:
@@ -198,12 +286,16 @@ def test_an_application_without_listeners_starts_and_publishing_tells_nobody() -
     An application with at least one listener never shows it; one without listeners could not
     start. Like Spring, a publisher without listeners is valid.
     """
-    container = wireup.create_sync_container(injectables=[application_event_publisher])
+    container = wireup.create_sync_container(injectables=[application_event_publisher, event_listener_method_processor])
 
+    container.get(EventListenerMethodProcessor).register_listeners()
     container.get(ApplicationEventPublisher).publish(SomethingHappened("nobody listens"))
+
+    assert not container.get(ApplicationEventPublisher).has_application_module_listeners
 
 
 def test_the_library_ships_the_publisher_so_applications_register_nothing() -> None:
     container = wireup.create_sync_container(injectables=[application_event_publisher_injectable])
 
     assert isinstance(container.get(ApplicationEventPublisher), ApplicationEventPublisher)
+    assert isinstance(container.get(EventListenerMethodProcessor), EventListenerMethodProcessor)

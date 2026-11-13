@@ -36,8 +36,9 @@ Changelog = "https://github.com/KdG-OCDI/snakeboot/blob/main/CHANGELOG.md"
 [project.optional-dependencies]
 # Typed configuration from application.toml, one profile and the environment (snakeboot.configuration).
 configuration = ["pydantic-settings>=2.16.0,<3"]
-# Publishes the REST controllers and advices of snakeboot.rest on FastAPI, served by uvicorn (snakeboot.fastapi_web).
-web = ["pydantic-settings>=2.16.0,<3", "fastapi>=0.162.2", "uvicorn>=0.54.0"]
+# Publishes the REST controllers and advices of snakeboot.rest on FastAPI, served by uvicorn (snakeboot.fastapi_web);
+# python-multipart reads the uploads of an UploadedFile.
+web = ["pydantic-settings>=2.16.0,<3", "fastapi>=0.162.2", "uvicorn>=0.54.0", "python-multipart>=0.0.33"]
 # Entities, repositories and migrations of snakeboot.data on SQLAlchemy, Alembic and PostgreSQL (snakeboot.sqlalchemy_data).
 data = ["pydantic-settings>=2.16.0,<3", "sqlalchemy>=2.1.8", "alembic>=1.20.1", "psycopg[binary]>=3.3.8"]
 # Similarity search on pgvector columns: a Vector field of snakeboot.data (with the extra data).
@@ -75,6 +76,7 @@ dev = [
     "pydantic-settings>=2.16.0,<3",
     "pyjwt[crypto]>=2.10.1",
     "pytest>=9.1.1",
+    "python-multipart>=0.0.33",
     "redis>=8.1.0",
     "ruff>=0.17.1",
     "sqlalchemy>=2.1.8",

@@ -1,13 +1,11 @@
-import inspect
 import logging
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Final
 
-from snakeboot.events.application_event_listener import InvalidApplicationEventListenerError
-from snakeboot.events.event_listener_markers import LISTENER_MAPPING_ATTRIBUTE, Delivery, ListenerMapping
+from snakeboot.events.application_event_listener_registry import ApplicationEventListenerRegistry, ListenerMethod
+from snakeboot.events.event_listener_markers import Delivery
 from snakeboot.events.event_publication_registry import EventPublication, EventPublicationRegistry
 from snakeboot.events.task_executor import SyncTaskExecutor, TaskExecutor
 from snakeboot.tracing import TraceContext
@@ -15,23 +13,12 @@ from snakeboot.transaction import TransactionManagerRegistry, after_commit
 
 logger = logging.getLogger(__name__)
 
-_SELF_AND_EVENT: Final = 2
-
-
-@dataclass(frozen=True, slots=True)
-class _Subscription:
-    """One listener method and the events it receives."""
-
-    name: str
-    receive: Callable[[object], None]
-    mapping: ListenerMapping
-
 
 @dataclass(frozen=True, slots=True)
 class _Delivery:
     """One event for one `@application_module_listener`: its publication in the registry, the publisher's trace."""
 
-    subscription: _Subscription
+    method: ListenerMethod
     event: object
     publication: EventPublication | None
     trace: TraceContext | None
@@ -50,45 +37,54 @@ class ApplicationEventPublisher:
     own and in the trace of the publisher; with a `registry`, the publisher's transaction stores the publication,
     the listener's transaction completes it, and `resubmit_incomplete` delivers the ones that failed or were lost.
 
-    The library registers it with wireup (`application_event_publisher_injectable`), connected
-    to every listener wireup found, or to none; tests build it with the listeners they need.
+    It keeps its listeners in an `ApplicationEventListenerRegistry`, which `register` fills. The library registers
+    the publisher with wireup (`application_event_publisher_injectable`) without a single listener, so a listener may
+    depend on a use case that publishes; the start-up then registers every listener wireup found, or none
+    (`EventListenerMethodProcessor`). Tests build it with the listeners they need.
     """
 
     def __init__(
         self,
-        listeners: Iterable[object],
+        listeners: Iterable[object] = (),
         *,
         executor: TaskExecutor | None = None,
         registry: EventPublicationRegistry | None = None,
     ) -> None:
-        self._subscriptions = sorted(
-            (subscription for listener in listeners for subscription in self._subscriptions_of(listener)),
-            key=lambda subscription: subscription.name,
-        )
+        self._listeners = ApplicationEventListenerRegistry()
         self._executor = executor or SyncTaskExecutor()
         self._registry = registry
-        asynchronous = [s for s in self._subscriptions if s.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT]
-        if registry is not None and asynchronous:
-            registry.verify({event_type for s in asynchronous for event_type in s.mapping.event_types})
+        self.register(listeners)
 
     @property
     def has_application_module_listeners(self) -> bool:
         """Whether a listener receives events on a thread of its own, so the registry may owe it some."""
-        return any(s.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT for s in self._subscriptions)
+        return any(m.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT for m in self._listeners.methods)
+
+    def register(self, listeners: Iterable[object]) -> None:
+        """Adds the listener methods of `listeners`, like Spring's `addApplicationListener`.
+
+        The start-up registers every `@application_event_listener` here once the container is built. A listener that
+        cannot listen raises `InvalidApplicationEventListenerError`, and so does an `@application_module_listener`
+        for events the registry cannot keep.
+        """
+        added = self._listeners.register(listeners)
+        asynchronous = [m for m in added if m.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT]
+        if self._registry is not None and asynchronous:
+            self._registry.verify({event_type for m in asynchronous for event_type in m.mapping.event_types})
 
     def publish(self, event: object) -> None:
         """Delivers `event` to every listener method for its type: at once, after the commit, or on its own."""
-        subscriptions = [s for s in self._subscriptions if isinstance(event, s.mapping.event_types)]
-        publications = self._stored(event, subscriptions)
-        for subscription in subscriptions:
-            match subscription.mapping.delivery:
+        methods = self._listeners.receiving(event)
+        publications = self._stored(event, methods)
+        for method in methods:
+            match method.mapping.delivery:
                 case Delivery.IN_TRANSACTION:
-                    subscription.receive(event)
+                    method.receive(event)
                 case Delivery.AFTER_COMMIT:
-                    after_commit(partial(subscription.receive, event))
+                    after_commit(partial(method.receive, event))
                 case Delivery.ASYNC_AFTER_COMMIT:
-                    publication, trace = publications.get(subscription.name), TraceContext.current()
-                    _after_commit_or_now(partial(self._hand_over, _Delivery(subscription, event, publication, trace)))
+                    publication, trace = publications.get(method.name), TraceContext.current()
+                    _after_commit_or_now(partial(self._hand_over, _Delivery(method, event, publication, trace)))
 
     def publish_all(self, events: Iterable[object]) -> None:
         """Publishes `events` in the order they happened."""
@@ -104,17 +100,17 @@ class ApplicationEventPublisher:
         if self._registry is None:
             return 0
         publications = self._registry.claim_due()
-        by_name = {subscription.name: subscription for subscription in self._subscriptions}
+        by_name = {method.name: method for method in self._listeners.methods}
         for publication in publications:
-            subscription = by_name.get(publication.listener_id)
-            if subscription is None:
+            method = by_name.get(publication.listener_id)
+            if method is None:
                 self._failed(publication, LookupError(f"No listener method is named {publication.listener_id}."))
             else:
-                self._hand_over(_Delivery(subscription, publication.event, publication, None))
+                self._hand_over(_Delivery(method, publication.event, publication, None))
         return len(publications)
 
-    def _stored(self, event: object, subscriptions: Sequence[_Subscription]) -> dict[str, EventPublication]:
-        owed = [s.name for s in subscriptions if s.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT]
+    def _stored(self, event: object, methods: Sequence[ListenerMethod]) -> dict[str, EventPublication]:
+        owed = [m.name for m in methods if m.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT]
         if self._registry is None or not owed:
             return {}
         return {publication.listener_id: publication for publication in self._registry.store(event, owed)}
@@ -128,11 +124,11 @@ class ApplicationEventPublisher:
         with TraceContext.started(delivery.trace.traceparent if delivery.trace is not None else None):
             try:
                 with _own_transaction():
-                    delivery.subscription.receive(delivery.event)
+                    delivery.method.receive(delivery.event)
                     if publication is not None and self._registry is not None:
                         self._registry.complete(publication)
             except Exception as error:
-                name, event = delivery.subscription.name, type(delivery.event).__qualname__
+                name, event = delivery.method.name, type(delivery.event).__qualname__
                 logger.exception("The listener %s failed on %s", name, event)
                 if publication is not None:
                     self._failed(publication, error)
@@ -144,30 +140,6 @@ class ApplicationEventPublisher:
             self._registry.fail(publication, error)
         except Exception:
             logger.exception("The failure of publication %s could not be recorded", publication.identifier)
-
-    def _subscriptions_of(self, listener: object) -> list[_Subscription]:
-        listener_class = type(listener)
-        subscriptions = [
-            _Subscription(
-                name=f"{listener_class.__module__}.{listener_class.__qualname__}.{name}",
-                receive=self._receiver(listener, name, method),
-                mapping=mapping,
-            )
-            for name, method in inspect.getmembers(listener_class, inspect.isfunction)
-            if (mapping := getattr(method, LISTENER_MAPPING_ATTRIBUTE, None)) is not None
-        ]
-        if not subscriptions:
-            raise InvalidApplicationEventListenerError(f"{listener_class.__name__} has no listener methods.")
-        return subscriptions
-
-    def _receiver(self, listener: object, name: str, method: Callable[..., Any]) -> Callable[[object], None]:
-        owner = f"{type(listener).__name__}.{name}"
-        if inspect.iscoroutinefunction(method):
-            raise InvalidApplicationEventListenerError(f"{owner} is async; listeners are synchronous.")
-        if len(inspect.signature(method).parameters) != _SELF_AND_EVENT:
-            raise InvalidApplicationEventListenerError(f"{owner} must take exactly one argument: the event.")
-        receive: Callable[[object], None] = getattr(listener, name)
-        return receive
 
 
 def _after_commit_or_now(callback: Callable[[], None]) -> None:

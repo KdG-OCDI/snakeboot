@@ -11,6 +11,7 @@ from snakeboot.sqlalchemy_data import Database
 from snakeboot.sqlalchemy_data.schema_migrations import (
     HISTORY_TABLE,
     InvalidMigrationError,
+    MigrateResult,
     SchemaMigrations,
     migration_locations,
     migrations_in,
@@ -74,8 +75,8 @@ def test_migrate_runs_every_pending_script_once(database: Database, tmp_path: Pa
     first = migrations.migrate()
     second = migrations.migrate()
 
-    assert [migration.label for migration in first] == ["1", "2"]
-    assert second == []
+    assert [migration.label for migration in first.applied] == ["1", "2"]
+    assert (first.baselined, second.applied) == ((), ())
     assert tables_of(database) == {"games", "moves", HISTORY_TABLE}
 
 
@@ -125,7 +126,8 @@ def test_a_failing_script_leaves_no_trace_and_runs_again_once_fixed(database: Da
 
     assert tables_of(database) == {HISTORY_TABLE}, "the first statement was rolled back with the second"
     script.write_text("CREATE TABLE games (id INTEGER PRIMARY KEY);", encoding="utf-8")
-    assert [migration.label for migration in SchemaMigrations(database, migrations_in([tmp_path])).migrate()] == ["1"]
+    applied = SchemaMigrations(database, migrations_in([tmp_path])).migrate().applied
+    assert [migration.label for migration in applied] == ["1"]
 
 
 def test_a_semicolon_in_a_string_a_comment_or_a_trigger_does_not_end_a_statement(
@@ -151,5 +153,5 @@ INSERT INTO games (id) VALUES (1)
 
 
 def test_without_migrations_only_the_history_table_is_made(database: Database) -> None:
-    assert SchemaMigrations(database, []).migrate() == []
+    assert SchemaMigrations(database, []).migrate() == MigrateResult(baselined=(), applied=())
     assert tables_of(database) == {HISTORY_TABLE}

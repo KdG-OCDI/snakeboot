@@ -9,7 +9,11 @@ from wireup import injectable
 
 from snakeboot.application.run_lifecycle_command import run_until
 from snakeboot.events import ApplicationEventPublisher, application_event_listener, event_listener
-from snakeboot.events.application_event_publisher_injectable import application_event_publisher
+from snakeboot.events.application_event_publisher_injectable import (
+    application_event_publisher,
+    event_listener_method_processor,
+)
+from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.lifecycle import ApplicationLifecycle, ApplicationReadyEvent
 from snakeboot.lifecycle.application_lifecycle_injectable import application_lifecycle
 from tests.lifecycle.sample_components import Early, Journal, Recording, StillAbstract, Wired
@@ -104,8 +108,16 @@ def test_wireup_hands_every_component_to_the_lifecycle_and_ready_goes_to_the_lis
             journal.entries.append("ready")
 
     container = wireup.create_sync_container(
-        injectables=[shared_journal, application_event_publisher, application_lifecycle, Wired, ReadyListener]
+        injectables=[
+            shared_journal,
+            application_event_publisher,
+            event_listener_method_processor,
+            application_lifecycle,
+            Wired,
+            ReadyListener,
+        ]
     )
+    container.get(EventListenerMethodProcessor).register_listeners()
     container.get(ApplicationLifecycle).start()
 
     assert journal.entries == ["start wired", "ready"]

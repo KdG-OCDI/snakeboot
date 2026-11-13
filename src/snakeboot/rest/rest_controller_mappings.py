@@ -11,6 +11,8 @@ ADVICE_MARKER_ATTRIBUTE: Final = "__rest_controller_advice__"
 EXCEPTION_HANDLER_ATTRIBUTE: Final = "__rest_exception_handler_mapping__"
 
 _PATH_PARAMETER: Final = re.compile(r"\{[^}]*\}")
+_PATH_PARAMETER_NAME: Final = re.compile(r"\{([^}:]*)")
+"""The name in `{name}`, also before the converter of `{name:path}`."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -26,7 +28,8 @@ class RouteMapping:
     """What `@route.get(...)` and friends record on a method: the HTTP method, the path and how it answers.
 
     `response` is the type of the body when it differs from the return annotation (None: take the annotation),
-    `status` the status of a successful answer, and `public` whether the endpoint answers without authentication.
+    `status` the status of a successful answer, `public` whether the endpoint answers without authentication, and
+    `produces` the media type of the `FileDownload` it answers with, for the OpenAPI document (None: any).
     Nothing here names a web framework, so any binding can publish the route.
     """
 
@@ -35,6 +38,7 @@ class RouteMapping:
     response: Any = None
     status: int = 200
     public: bool = False
+    produces: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -63,6 +67,11 @@ class DeclaredEndpoint:
     def name(self) -> str:
         """`Controller.method`, for error messages."""
         return f"{self.controller_class.__name__}.{self.method.__name__}"
+
+    @property
+    def path_parameters(self) -> frozenset[str]:
+        """The names of the parameters that the path holds: `workshop_id` of `{workshop_id}`, in the prefix or not."""
+        return frozenset(_PATH_PARAMETER_NAME.findall(f"{self.prefix}/{self.route_mapping.path}"))
 
     @property
     def route_key(self) -> tuple[str, str]:

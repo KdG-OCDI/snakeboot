@@ -43,3 +43,13 @@ class RoleSecuredApplication:
 @application_root(base_packages=("tests.rest.traced",))
 class TracedApplication:
     pass
+
+
+@application_root(base_packages=("tests.rest.files", "tests.rest.files_advice"))
+class FilesApplication:
+    pass
+
+
+@application_root(base_packages=("tests.rest.files",))
+class UnadvisedFilesApplication:
+    pass

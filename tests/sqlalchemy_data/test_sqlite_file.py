@@ -83,7 +83,7 @@ def test_the_migrations_run_on_a_file(tmp_path: Path) -> None:
     (migrations / "V1__create_seats.sql").write_text("CREATE TABLE seats (id INTEGER PRIMARY KEY);\n", encoding="utf-8")
     database = file_database(tmp_path)
 
-    applied = SchemaMigrations(database, migrations_in([migrations])).migrate()
+    applied = SchemaMigrations(database, migrations_in([migrations])).migrate().applied
 
     assert [migration.label for migration in applied] == ["1"]
     assert SchemaMigrations(database, migrations_in([migrations])).pending() == []

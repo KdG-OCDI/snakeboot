@@ -1,11 +1,12 @@
 import inspect
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, Final
 
 from snakeboot.component_scan import ComponentScan
 from snakeboot.rest.bearer_authentication import AUTHENTICATION_MARKER_ATTRIBUTE, BearerAuthentication
 from snakeboot.rest.endpoint_signature import EndpointSignature, method_parameters
+from snakeboot.rest.file_download import FileDownload
 from snakeboot.rest.rest_controller_errors import InvalidRestControllerError
 from snakeboot.rest.rest_controller_mappings import (
     ADVICE_MARKER_ATTRIBUTE,
@@ -19,6 +20,9 @@ from snakeboot.rest.rest_controller_mappings import (
     RouteMapping,
 )
 from snakeboot.rest.roles_allowed import ROLES_ATTRIBUTE, roles_of
+
+_METHODS_WITH_A_BODY: Final = frozenset({"POST", "PUT", "PATCH"})
+"""The HTTP methods whose calls carry a body, and so may upload a file."""
 
 
 @dataclass(frozen=True, slots=True)
@@ -56,7 +60,9 @@ class ControllerScan:
 
     Like Spring, it refuses to start on an ambiguous API: two endpoints for the same HTTP method and path, two
     advice methods for the same error type, or two authentications. An endpoint that asks for a `Principal` or names
-    roles while nobody authenticates its calls stops the start too.
+    roles while nobody authenticates its calls stops the start too, and so does one that takes an `UploadedFile` on
+    a GET or DELETE, whose call carries no body, or names `produces` but answers with something else than a
+    `FileDownload`.
     """
 
     def __init__(self, component_scan: ComponentScan) -> None:
@@ -71,6 +77,7 @@ class ControllerScan:
         _refuse_ambiguous_routes(endpoints)
         _refuse_principals_nobody_supplies(endpoints, authenticated=authentication is not None)
         _refuse_roles_nobody_checks(endpoints, authenticated=authentication is not None)
+        _refuse_misplaced_files(endpoints)
         error_handlers = [handler for advice in advices for handler in self._error_handlers_of(advice)]
         _refuse_ambiguous_error_handlers(error_handlers)
         return ScannedControllers(controllers, advices, endpoints, error_handlers, authentication)
@@ -159,6 +166,21 @@ def _refuse_roles_nobody_checks(endpoints: Sequence[DeclaredEndpoint], *, authen
         if endpoint.roles and not authenticated:
             raise InvalidRestControllerError(
                 f"{endpoint.name} names roles, but the component scan declares no BearerAuthentication."
+            )
+
+
+def _refuse_misplaced_files(endpoints: Sequence[DeclaredEndpoint]) -> None:
+    for endpoint in endpoints:
+        http_method = endpoint.route_mapping.http_method
+        if endpoint.signature.upload_parameters and http_method not in _METHODS_WITH_A_BODY:
+            raise InvalidRestControllerError(
+                f"{endpoint.name} takes an UploadedFile, but a {http_method} call carries no body: an upload is the "
+                "form of a POST, PUT or PATCH."
+            )
+        if endpoint.route_mapping.produces is not None and endpoint.signature.response is not FileDownload:
+            raise InvalidRestControllerError(
+                f"{endpoint.name} produces {endpoint.route_mapping.produces!r}, the media type of a file, but does not "
+                "answer with a FileDownload."
             )
 
 

@@ -102,6 +102,21 @@ def test_a_principal_without_an_authentication_stops_the_start_up() -> None:
         scan_of("principal_without_authentication").find()
 
 
+def test_an_upload_on_a_call_without_a_body_stops_the_start_up() -> None:
+    with pytest.raises(InvalidRestControllerError, match=r"import_file takes an UploadedFile, but a GET call carries"):
+        scan_of("upload_by_get").find()
+
+
+def test_produces_on_an_endpoint_that_answers_without_a_file_stops_the_start_up() -> None:
+    with pytest.raises(InvalidRestControllerError, match=r"report produces 'text/csv'.*does not answer with a File"):
+        scan_of("produces_json").find()
+
+
+def test_produces_names_a_media_type() -> None:
+    with pytest.raises(InvalidRestControllerError, match="such as 'application/pdf'; got 'pdf'"):
+        route.get("/poster", produces="pdf")
+
+
 def test_a_prefix_must_start_with_a_slash() -> None:
     with pytest.raises(InvalidRestControllerError):
         rest_controller("workshops")

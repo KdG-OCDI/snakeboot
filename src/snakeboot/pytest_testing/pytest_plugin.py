@@ -32,25 +32,24 @@ _SOURCES: Final = pytest.StashKey[ProjectSources]()
 @pytest.fixture(name=APPLICATION_TEST_FIXTURE)
 def application_test_fixture(request: pytest.FixtureRequest) -> Iterator[Mapping[str, object]]:
     """Starts the application of an `@application_test` for one test, fills its fields and hands its parameters."""
-    from snakeboot.boot.testing import TestApplication  # noqa: PLC0415  # reason: only a test that starts one needs it
+    from snakeboot.boot.testing import SPY, TestApplication  # noqa: PLC0415  # reason: only a test that starts one needs it
 
     marker = _marker_of(request)
     fields = injected_fields_of(request.cls) if application_test_of(request.cls) is not None else {}
     parameters = injected_parameters_of(request.function)
     points = [*fields.values(), *parameters.values()]
     mocks = {p.component_type: create_autospec(p.component_type, instance=True) for p in points if _is(p, "MOCK")}
+    # A spy is in place before the listeners are built, like @MockitoSpyBean before the beans that depend on it.
+    spies = {p.component_type: SPY for p in points if _is(p, "SPY")}
     sources = _sources_of(request.config)
     test_components = {**sources.test_components(), **nested_test_components(_classes_of(request), mocks.keys())}
     with TestApplication.start(
         _application_of(marker, sources),
-        mocks,
+        {**spies, **mocks},
         environment=marker.environment,
         only=marker.only,
         test_components={replaced: _built(component) for replaced, component in test_components.items()},
     ) as started:
-        for point in points:
-            if _is(point, "SPY"):
-                started.spy(point.component_type)
         for name, point in fields.items():
             setattr(request.instance, name, _injected(started, mocks, point))
         yield {name: _injected(started, mocks, point) for name, point in parameters.items()}

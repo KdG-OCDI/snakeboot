@@ -16,7 +16,9 @@
 
 Events are facts, never requests: a caller that needs an outcome calls a facade instead. With a database, the
 publications of the `@application_module_listener` methods are kept in the `EventPublicationRegistry` until they
-were delivered (`snakeboot.event_publication`), so they arrive at least once.
+were delivered (`snakeboot.event_publication`), so they arrive at least once. The publisher depends on no listener:
+the start-up builds every listener once the container is built and registers it (`EventListenerMethodProcessor`), so a
+listener may inject a use case that publishes events, and one that cannot be built stops the start.
 The library knows wireup, `snakeboot.transaction` and `snakeboot.tracing`, but no framework and no bounded context.
 """
 

@@ -33,6 +33,7 @@ SQLAlchemy or Alembic. snakeboot binds them, so another framework means another 
 | `InvalidRequestError`, `RequestProblem` | `MethodArgumentNotValidException` | `snakeboot[web]` |
 | `ServerSentEvents`, `ServerSentEvent` | `SseEmitter`, `ServerSentEvent` | `snakeboot[web]` |
 | `@entity`, `Id`, `Column`, `Index`, `CreatedDate`, `LastModifiedDate` | `@Entity`, `@Id`, `@Column`, `@Index`, `@CreatedDate`, `@LastModifiedDate` | `snakeboot[data]` |
+| `UniqueConstraint`, `ForeignKey`, `BigInt`, `SmallInt` | `@UniqueConstraint`, `@JoinColumn` with `@ForeignKey` and `@OnDelete`, `long`, `short` | `snakeboot[data]` |
 | `Version`, `CreatedBy`, `LastModifiedBy`, `OptimisticLockingFailureError` | `@Version`, `@CreatedBy`, `@LastModifiedBy`, `OptimisticLockingFailureException` | `snakeboot[data]` |
 | `CrudRepository`, derived queries, `@query`, `@lock`, `PageRequest` | Spring Data's `CrudRepository`, query methods, `@Query`, `@Lock`, `Pageable` | `snakeboot[data]` |
 | `migrate`, `make_migration`, `migrations/V1__*.sql` | Flyway | `snakeboot[data]` |
@@ -138,6 +139,7 @@ workers = 2                 # processes, each with its own listeners and schedul
 debug = false
 allowed_hosts = ["*"]       # or "games.example.com", "*.example.com"
 log_level = "INFO"
+max_upload_size = "20MB"    # optional: the largest UploadedFile, 1 MiB without it
 
 [database]                  # PostgreSQL; the password comes from DATABASE__PASSWORD
 host = "db"
@@ -207,6 +209,32 @@ class GameRecord:
     version: Annotated[int | None, Version()] = None  # 1 for a new entity, one more per update
 ```
 
+An entity also declares the constraints that keep its rows consistent, with the names the schema gives them, so that
+`make_migration` and the schema checks of the tests find nothing to change in a schema that migrations made, an
+existing one included. `UniqueConstraint` is JPA's `@UniqueConstraint`, over one column or more; an `Index` with
+`unique=True` is a unique index, and with `where` a partial one, which holds only the rows of its condition (on
+PostgreSQL a unique index is no unique constraint: declare the one the schema has). `ForeignKey` makes a column refer
+to another entity's table, like `@JoinColumn` with `@ForeignKey`, and `on_delete` says what happens to the rows that
+refer to a deleted one, like Hibernate's `@OnDelete`; without it the delete is a `DataIntegrityViolationError`.
+`deferred=True` checks the key at the commit, as Django declares every foreign key on PostgreSQL. There are no
+relationships: a repository loads the rows that refer to another, as in Spring Data JDBC. An `int` is an INTEGER;
+`BigInt()` and `SmallInt()` make it a BIGINT or a SMALLINT, like Java's `long` and `short`. The schema checks compare
+neither a foreign key's name nor a partial index's condition.
+
+```python
+@entity(
+    "funding_deadline",
+    indexes=(Index("funding_deadline_open_uniq", "funding_call_id", unique=True, where="closed_at IS NULL"),),
+    unique_constraints=(UniqueConstraint("funding_deadline_call_stage_uniq", "funding_call_id", "stage"),),
+)
+@dataclass
+class FundingDeadlineRecord:
+    id: Annotated[int | None, Id(generated=True)]  # a BIGINT the database numbers
+    funding_call_id: Annotated[int, BigInt(), ForeignKey("funding_call.id", on_delete="cascade")]
+    stage: Annotated[int, SmallInt()]
+    closed_at: datetime | None
+```
+
 A repository method whose last parameter is a `PageRequest` returns one page. On PostgreSQL a `Vector(384)` field
 (extra `snakeboot[vector]`) holds an embedding for pgvector's similarity search in a `@query`.
 
@@ -216,6 +244,34 @@ database has not run, in version order, each in a transaction, remembering them 
 changed after it ran stops it, and on PostgreSQL two processes never migrate at once. `python -m myapp make_migration
 "add a winner"` writes the SQL the entities need as the next script, by letting Alembic compare them with the
 database. A migration is plain SQL, so it stays valid when the persistence framework changes.
+
+A database whose schema was made before its migrations (by another tool, an earlier version of the application, or
+by hand) is baselined, like Flyway's `baseline-on-migrate` with `baseline-version`: `V1__...sql` holds that schema,
+and `[database] baseline_version = 1` makes `migrate` record V1 as run, without running it, when it finds tables but
+no history of migrations; the later migrations run as usual. A fresh database (a test, a new developer) has no
+tables, so it runs V1 and gets the same schema; a database with a history is never baselined. Like Flyway, the history
+keeps no checksum for a baselined script, so V1 may still be corrected for the fresh databases. Without the key,
+`migrate` runs V1 there as before, and when V1 fails on those tables, its error names `baseline_version`.
+
+**Moving an existing database to snakeboot.** An application that leaves another framework (Django, or snakeboot
+before 0.8) keeps its schema and its data where they are: no export, no import.
+
+1. `V1__...sql` is the schema as it is, from `pg_dump --schema-only --no-owner --no-privileges`: the application's own
+   tables, not those of the framework it leaves (`django_migrations`, `auth_*`, `django_session`). Leave out psql's
+   meta-commands, such as the `\restrict` lines newer versions of `pg_dump` write; its `SET` lines may stay, as
+   `migrate` resets the session after every script.
+2. The entities describe that schema with its own names: the table, every `Index` and `UniqueConstraint` by the name
+   the schema has, a `ForeignKey` with its `on_delete` and `deferred=True` (Django declares every key that way),
+   `BigInt()` where a column is a `bigint`. A generated key is a BIGINT, as Django's `BigAutoField` is; a key Django
+   made `integer` shows as a change. `make_migration` against a database that ran V1 writes what the entities and the
+   schema still disagree on, and the schema check of `PostgreSQLContainer` stops the tests on it, so both find
+   nothing once the entities are right.
+3. The production configuration sets `[database] baseline_version = 1`: the first `migrate` there records V1 and runs
+   only what comes after it.
+4. A `V1` from `pg_dump` holds PostgreSQL's own SQL (`GENERATED BY DEFAULT AS IDENTITY`, `::text` casts), which the
+   SQLite of `@application_test` refuses, so the tests run with `@application_test(database=PostgreSQLContainer())`.
+5. Leave the old framework's tables in place until the move has proven itself: while the later migrations only add,
+   the previous version still runs on the same database, and going back is deploying it again, without a restore.
 
 **Transactions.** A use case declares its boundary; snakeboot chooses the technology, SQLAlchemy's session when the
 application has `[database]`. A nested `@transactional` call is a savepoint; `after_commit` waits for the outermost
@@ -244,6 +300,11 @@ class ParticipantNotificationListener:
     @transactional_event_listener(WaitlistedParticipantPromoted)
     def notify_promoted(self, event: WaitlistedParticipantPromoted) -> None: ...
 ```
+
+A listener may inject any component, also a use case that publishes events of its own, as a listener between two
+bounded contexts often does: the publisher depends on no listener. Like Spring's `EventListenerMethodProcessor`, the
+start-up builds every listener once the container is built and registers it with the publisher, so a listener that
+cannot be built stops the start, not the first event.
 
 A `@transactional_event_listener` that fails, or a process that stops before it ran, loses the event. For what must
 arrive, an `@application_module_listener` is Spring Modulith's `@ApplicationModuleListener`: it receives the event after
@@ -320,6 +381,32 @@ def watch_game(self, game_id: str) -> ServerSentEvents:
         until=lambda game: game.status in FINAL_STATUSES,
         as_event=lambda game: ServerSentEvent(game, event="game", id=str(game.version)),  # data as JSON
     )
+```
+
+**Files.** A parameter of type `UploadedFile` takes a file from a `multipart/form-data` form, like Spring's
+`MultipartFile`: the part of the same name fills it, with its `filename`, `content_type`, `size` and `content` (the
+bytes), and the endpoint's other parameters outside the path are fields of the same form. A file larger than
+`[server] max_upload_size` (a number of bytes, "20MB" or "20MiB"; 1 MiB without it, as Spring Boot's `max-file-size`)
+never reaches the endpoint: it is an `UploadTooLargeError`, which an advice answers like any error, and without one
+413 `{"code": "upload_too_large", "detail": "..."}`. Swagger UI shows the form with a file picker; a test sends it
+with `client.post(url, files={"document": ("form.pdf", content, "application/pdf")}, data={"title": "..."})`.
+
+An endpoint that returns a `FileDownload` answers with a file, like `ResponseEntity<Resource>`: its bytes, its media
+type as `Content-Type`, and `Content-Disposition: attachment` (`inline=True` shows it in the browser) with the file
+name, in UTF-8 in `filename*` when it has accents and as near as ASCII gets in `filename`, as RFC 6266 advises.
+`produces` on the route names the media type in the OpenAPI document, like `@GetMapping(produces = ...)`. An upload
+on a GET or DELETE, a list of files, or `produces` on an endpoint that answers JSON stops the start.
+
+```python
+@route.post("/{call_id}/application-forms", status=201)
+def upload_application_form(self, call_id: str, document: UploadedFile, title: str) -> ApplicationFormDTO:
+    return self._forms.store(call_id, title, document.filename, document.content)
+
+
+@route.get("/{proposal_id}/document", produces=WORD)  # "application/vnd.openxmlformats-...document"
+def download_proposal(self, proposal_id: str) -> FileDownload:
+    proposal = self._proposals.render(proposal_id)
+    return FileDownload(proposal.content, WORD, filename=f"{proposal.title}.docx")  # "Begroting café.docx"
 ```
 
 **Authentication.** An adapter that extends `BearerAuthentication` is a component of the container, like a
@@ -570,14 +657,16 @@ The infrastructure of a test is snakeboot's own, so nothing outside the test run
   Spring Boot's tests: the scripts `migrate` runs, all of them, also in a slice. They run once per process, and every
   test gets a copy of the result. First the migrated schema is compared with the entities, like Hibernate's
   `ddl-auto=validate`: a table, column, NOT NULL or index the migrations lack stops the tests, with the SQL
-  `make_migration` would still write. SQLite takes the type names of a migration as they come, so the types are
-  compared on PostgreSQL. An application without migrations gets the tables of its entities.
+  `make_migration` would still write. SQLite takes the type names of a migration as they come and does not show every
+  unique constraint or foreign key, so those are compared on PostgreSQL; its foreign keys are on, so a delete cascades
+  or is refused as in production. An application without migrations gets the tables of its entities.
 * What SQLite cannot run or show (a migration in PostgreSQL's own SQL, a `Vector`'s similarity search, `@lock`,
   PostgreSQL's own SQL in an `@query`) runs on PostgreSQL, in a container, like Testcontainers' `PostgreSQLContainer`
   with `@ServiceConnection`: `@application_test(database=PostgreSQLContainer("pgvector/pgvector:pg17"))`. A migration
   that SQLite rejects stops the tests on SQLite with its name. On PostgreSQL the migrations build the schema once per
   process too, and every test gets a copy of it (`CREATE DATABASE ... TEMPLATE`, a tenth of a second); the comparison
-  with the entities includes the types. It needs Docker and `snakeboot[testcontainers]`.
+  with the entities includes the types, the unique constraints and the foreign keys. It needs Docker and
+  `snakeboot[testcontainers]`.
 * **The events**: `Autowired[PublishedEvents]` holds every event the application published during the test, like
   Spring's `ApplicationEvents` and Spring Modulith's `PublishedEvents`: `[closed] = events.of_type(AuctionClosed)`.
 * **The broker**: with `[rabbitmq]`, the `RabbitTemplate` is an `InProcessRabbitTemplate`, like Spring AMQP's
@@ -643,11 +732,11 @@ Three more things a test may ask for:
   scheduler, listeners with the lifecycle running, a `LocalServer`.
 
 Underneath, `TestApplication` starts the application as it runs, from its `application.toml`, like `@SpringBootTest`
-with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace components with doubles,
-`environment=TestEnvironment(profile=..., properties=..., database=...)` says where it runs and `only=WebSlice()` or
-`only=ModuleSlice(("...",))` how much of it. `client()` calls the REST
-API in the same process, like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may
-use it directly:
+with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace components with doubles, or with
+`SPY` wrap them in a spy before anything that depends on them is built (`overrides={PaymentPort: SPY}`, what a
+`SpyComponent` does), `environment=TestEnvironment(profile=..., properties=..., database=...)` says where it runs and
+`only=WebSlice()` or `only=ModuleSlice(("...",))` how much of it. `client()` calls the REST API in the same process,
+like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may use it directly:
 
 ```python
 def test_a_started_game_can_be_read() -> None:

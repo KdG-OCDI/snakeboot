@@ -30,7 +30,8 @@ MockComponent = Annotated[T, Injection.MOCK]
 SpyComponent = Annotated[T, Injection.SPY]
 """The component of type `T`, wrapped in a spy that records its calls, like `@MockitoSpyBean`.
 
-It does what the component does, unless `when(...)` says otherwise; `verify(...)` checks how it was called.
+It does what the component does, unless `when(...)` says otherwise; `verify(...)` checks how it was called. It replaces
+the component before anything that depends on it is built, so it records what the event listeners call too.
 """
 
 

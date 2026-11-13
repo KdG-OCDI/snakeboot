@@ -42,7 +42,11 @@ class MigrationGenerator:
         self._migrations = migrations
 
     def changes(self) -> str:
-        """Returns the SQL statements the schema lacks, or an empty text when it fits the entities."""
+        """Returns the SQL statements the schema lacks, or an empty text when it fits the entities.
+
+        Alembic compares a foreign key by its columns, its target, `ON DELETE` and whether it is deferred, not by its
+        name, and a partial index without its condition: a schema that differs only there fits.
+        """
         return _sql_of(self._operations(_known, compare_types=True), self._database.engine.dialect.name)
 
     def changes_sqlite_shows(self) -> str:

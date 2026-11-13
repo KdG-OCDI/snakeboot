@@ -3,7 +3,6 @@
 One container serves every test of the process; without a running Docker these tests are skipped.
 """
 
-import subprocess
 from uuid import uuid4
 
 import pytest
@@ -20,18 +19,11 @@ from snakeboot.testing import (
     application_module_test,
     application_test,
 )
+from tests.containers import docker_runs
 from tests.pytest_testing.depot.deliveries.deliveries import DeliveryRecord, DeliveryRecords
 from tests.pytest_testing.depot.depot_application import DepotApplication
 from tests.pytest_testing.parcels.parcels import ParcelRecord, ParcelRecords, ParcelsApplication, SendParcel
 from tests.pytest_testing.unfit.unfit_application import UnfitApplication
-
-
-def docker_runs() -> bool:
-    try:
-        return subprocess.run(["docker", "info"], capture_output=True, timeout=30, check=False).returncode == 0
-    except (OSError, subprocess.TimeoutExpired):
-        return False
-
 
 pytestmark = pytest.mark.skipif(not docker_runs(), reason="a PostgreSQLContainer needs a running Docker")
 

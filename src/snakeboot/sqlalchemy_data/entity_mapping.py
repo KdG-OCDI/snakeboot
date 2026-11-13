@@ -19,21 +19,38 @@ from sqlalchemy import (
     LargeBinary,
     MetaData,
     Numeric,
+    SmallInteger,
     String,
     Table,
     Text,
     TypeDecorator,
     Uuid,
+    text,
 )
 from sqlalchemy import Column as SqlColumn
 from sqlalchemy import Enum as SqlEnum
+from sqlalchemy import ForeignKey as SqlForeignKey
 from sqlalchemy import Index as SqlIndex
+from sqlalchemy import UniqueConstraint as SqlUniqueConstraint
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.ext.mutable import MutableDict, MutableList
 from sqlalchemy.orm import registry
 from sqlalchemy.types import TypeEngine
 
-from snakeboot.data import Column, EntityDescription, Id, InvalidEntityError, Json, Property, Vector, description_of
+from snakeboot.data import (
+    BigInt,
+    Column,
+    EntityDescription,
+    ForeignKey,
+    Id,
+    Index,
+    InvalidEntityError,
+    Json,
+    Property,
+    SmallInt,
+    Vector,
+    description_of,
+)
 
 _METADATA: Final = MetaData()
 """Every table of the process: an entity class is mapped once, whichever application context maps it first."""
@@ -73,9 +90,15 @@ class EntityMapping:
 
     @classmethod
     def of(cls, entity_types: Iterable[type]) -> "EntityMapping":
-        """Maps every entity class in `entity_types` to its table; a class mapped before keeps its table."""
+        """Maps every entity class in `entity_types` to its table; a class mapped before keeps its table.
+
+        A foreign key that refers to a column no table of `entity_types` has stops the start: the schema is compared
+        with these tables alone.
+        """
+        descriptions = [description_of(entity_type) for entity_type in entity_types]
+        _refuse_foreign_keys_to_unknown_columns(descriptions)
         with _MAPPING_LOCK:
-            return cls({entity_type: _mapped(description_of(entity_type)) for entity_type in entity_types})
+            return cls({description.entity_type: _mapped(description) for description in descriptions})
 
     @property
     def entity_types(self) -> list[type]:
@@ -117,18 +140,46 @@ def _mapped(description: EntityDescription) -> Table:
     return table
 
 
+def _refuse_foreign_keys_to_unknown_columns(descriptions: list[EntityDescription]) -> None:
+    # The schema is compared with these tables alone, and SQLAlchemy finds the column a key refers to among them.
+    columns = {f"{description.table}.{prop.name}" for description in descriptions for prop in description.properties}
+    for description in descriptions:
+        for prop in description.properties:
+            unknown = [key.target for key in prop.markers if isinstance(key, ForeignKey) and key.target not in columns]
+            if unknown:
+                raise InvalidEntityError(
+                    f"{description.entity_type.__name__}.{prop.name} refers to {unknown[0]}, a column of no entity "
+                    "that starts with it: a foreign key refers to an entity of the same application, and a test "
+                    "slice starts both."
+                )
+
+
 def _table_of(description: EntityDescription) -> Table:
-    table = Table(description.table, _METADATA, *(_column_of(description, prop) for prop in description.properties))
+    columns = (_column_of(description, prop) for prop in description.properties)
+    unique_constraints = (
+        SqlUniqueConstraint(*constraint.columns, name=constraint.name) for constraint in description.unique_constraints
+    )
+    table = Table(description.table, _METADATA, *columns, *unique_constraints)
     for index in description.indexes:
-        SqlIndex(index.name, *(table.c[column] for column in index.columns))
+        _index_of(table, index)
     return table
+
+
+def _index_of(table: Table, index: Index) -> SqlIndex:
+    # A partial index's condition is plain SQL, which PostgreSQL and SQLite read alike.
+    where: dict[str, Any] = (
+        {} if index.where is None else {"postgresql_where": text(index.where), "sqlite_where": text(index.where)}
+    )
+    return SqlIndex(index.name, *(table.c[column] for column in index.columns), unique=index.unique, **where)
 
 
 def _column_of(description: EntityDescription, prop: Property) -> SqlColumn[Any]:
     identifier, column = prop.marker(Id), prop.marker(Column) or Column()
+    references = [_foreign_key_of(marker) for marker in prop.markers if isinstance(marker, ForeignKey)]
     return SqlColumn(
         prop.name,
         _type_of(description, prop),
+        *references,
         primary_key=identifier is not None,
         autoincrement=identifier is not None and identifier.generated,
         nullable=prop.nullable and identifier is None,  # a number the database gives is never empty in a row
@@ -137,8 +188,18 @@ def _column_of(description: EntityDescription, prop: Property) -> SqlColumn[Any]
     )
 
 
+def _foreign_key_of(foreign_key: ForeignKey) -> SqlForeignKey:
+    return SqlForeignKey(
+        foreign_key.target,
+        name=foreign_key.name,
+        ondelete=foreign_key.on_delete.upper() if foreign_key.on_delete is not None else None,
+        deferrable=foreign_key.deferred or None,
+        initially="DEFERRED" if foreign_key.deferred else None,
+    )
+
+
 def _type_of(description: EntityDescription, prop: Property) -> TypeEngine[Any]:  # noqa: PLR0911  # reason: one per type
-    python_type, column, identifier = prop.python_type, prop.marker(Column), prop.marker(Id)
+    python_type, column = prop.python_type, prop.marker(Column)
     if (vector := prop.marker(Vector)) is not None:
         return _vector(vector.dimensions)
     container = get_origin(python_type) or python_type
@@ -147,7 +208,7 @@ def _type_of(description: EntityDescription, prop: Property) -> TypeEngine[Any]:
     if python_type is str:
         return String(column.length) if column is not None and column.length else Text()
     if python_type is int:
-        return BigInteger().with_variant(Integer(), "sqlite") if identifier and identifier.generated else Integer()
+        return _integer_of(prop)
     simple: dict[Any, TypeEngine[Any]] = {
         bool: Boolean(),
         float: Float(),
@@ -162,6 +223,18 @@ def _type_of(description: EntityDescription, prop: Property) -> TypeEngine[Any]:
     if isinstance(python_type, type) and issubclass(python_type, Enum):
         return SqlEnum(python_type, native_enum=False, values_callable=lambda members: [m.value for m in members])
     raise InvalidEntityError(f"{description.entity_type.__name__}.{prop.name}: no column type for {python_type!r}.")
+
+
+def _integer_of(prop: Property) -> TypeEngine[Any]:
+    identifier = prop.marker(Id)
+    generated = identifier is not None and identifier.generated
+    sized: TypeEngine[Any] = Integer()
+    if prop.marker(SmallInt) is not None:
+        sized = SmallInteger()
+    elif prop.marker(BigInt) is not None or generated:
+        sized = BigInteger()
+    # SQLite numbers the rows itself only for a key declared exactly INTEGER PRIMARY KEY.
+    return sized.with_variant(Integer(), "sqlite") if generated else sized
 
 
 def _json_of(container: Any, *, nullable: bool) -> TypeEngine[Any]:
