@@ -2,14 +2,16 @@
 
 import pytest
 import wireup
+from pydantic import ValidationError
 from wireup import injectable
 
 from snakeboot.application import ApplicationContext
 from snakeboot.boot import CONDITIONAL_MODULES
-from snakeboot.configuration import RabbitProperties
+from snakeboot.configuration import RabbitListenerRetryProperties, RabbitProperties
 from snakeboot.lifecycle import ApplicationComponents, Lifecycle, TaskDecorator
-from snakeboot.rabbitmq import RabbitConnectionFactory, RabbitListenerContainers, RabbitTemplate
+from snakeboot.rabbitmq import ListenerTiming, RabbitConnectionFactory, RabbitListenerContainers, RabbitTemplate
 from snakeboot.rabbitmq.rabbitmq_injectable import (
+    listener_timing,
     rabbit_connection_factory,
     rabbit_listener_containers,
     rabbit_template,
@@ -57,6 +59,49 @@ RABBITMQ_AUTO_CONFIGURATION = "snakeboot.rabbitmq.rabbitmq_injectable"
 
 def modules_of(application: type) -> list[str]:
     return ApplicationContext.of(application, CONDITIONAL_MODULES).scan.module_names()
+
+
+def rabbit_properties_of(monkeypatch: pytest.MonkeyPatch, properties: dict[str, object]) -> RabbitProperties:
+    for name, value in BROKER.items():
+        monkeypatch.setenv(name, value)
+    context = ApplicationContext.of(ApplicationWithoutCommands, CONDITIONAL_MODULES, properties=properties)
+    return context.configuration.get(RabbitProperties)
+
+
+def test_without_the_retry_table_a_failing_message_is_tried_three_times_a_second_apart(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    properties = rabbit_properties_of(monkeypatch, {})
+
+    assert properties.listener.retry is None
+    assert listener_timing(properties.listener.retry) == ListenerTiming()  # three attempts, a second apart
+
+
+def test_the_retry_table_sets_the_attempts_and_the_exponential_back_off(monkeypatch: pytest.MonkeyPatch) -> None:
+    retry = {"max_attempts": 6, "initial_interval": 2, "multiplier": 2, "max_interval": "PT30S"}
+
+    properties = rabbit_properties_of(
+        monkeypatch, {f"rabbitmq.listener.retry.{key}": value for key, value in retry.items()}
+    )
+
+    assert listener_timing(properties.listener.retry) == ListenerTiming(
+        attempts=6, retry_pause_seconds=2, retry_multiplier=2, max_retry_pause_seconds=30
+    )
+
+
+@pytest.mark.parametrize(
+    "retry",
+    [
+        {"max_attempts": 0, "initial_interval": 1, "multiplier": 1, "max_interval": 10},
+        {"max_attempts": 3, "initial_interval": -1, "multiplier": 1, "max_interval": 10},
+        {"max_attempts": 3, "initial_interval": 1, "multiplier": 0.5, "max_interval": 10},
+        {"max_attempts": 3, "initial_interval": 20, "multiplier": 2, "max_interval": 10},
+    ],
+    ids=["no attempt", "a negative interval", "a shrinking pause", "a longest pause shorter than the first"],
+)
+def test_a_retry_table_that_cannot_work_stops_the_start(retry: dict[str, object]) -> None:
+    with pytest.raises(ValidationError, match=r"\[rabbitmq\.listener\.retry\] needs"):
+        RabbitListenerRetryProperties.model_validate(retry)
 
 
 def test_wireup_provides_the_template_and_the_listener_containers() -> None:

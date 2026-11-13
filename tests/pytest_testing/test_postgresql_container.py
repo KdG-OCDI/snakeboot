@@ -13,7 +13,15 @@ from snakeboot.boot.testing import TestApplication
 from snakeboot.data import DataIntegrityViolationError
 from snakeboot.sqlalchemy_data.schema_migrations import InvalidMigrationError
 from snakeboot.sqlalchemy_data.testing import postgresql_database
-from snakeboot.testing import Autowired, PostgreSQLContainer, TestEnvironment, application_test
+from snakeboot.testing import (
+    Autowired,
+    PostgreSQLContainer,
+    TestEnvironment,
+    application_module_test,
+    application_test,
+)
+from tests.pytest_testing.depot.deliveries.deliveries import DeliveryRecord, DeliveryRecords
+from tests.pytest_testing.depot.depot_application import DepotApplication
 from tests.pytest_testing.parcels.parcels import ParcelRecord, ParcelRecords, ParcelsApplication, SendParcel
 from tests.pytest_testing.unfit.unfit_application import UnfitApplication
 
@@ -34,7 +42,7 @@ on_postgresql = application_test(application=ParcelsApplication, database=POSTGR
 
 @on_postgresql
 def test_the_schema_is_the_one_the_migrations_built(parcels: Autowired[ParcelRecords]) -> None:
-    # The check of the status is in V1__create_parcel.sql only: SQLite in memory, built from the entities, lacks it.
+    # The check of the status is in V1__create_parcel.sql only: the entity knows no such check.
     with pytest.raises(DataIntegrityViolationError):
         parcels.save(ParcelRecord(uuid4(), "ann", "LOST"))
 
@@ -61,6 +69,14 @@ def test_migrations_that_lack_a_column_of_an_entity_stop_every_test_on_them() ->
             InvalidMigrationError, match=r"(?s)make_migration would still write:.*ALTER TABLE shelf ADD"
         ):
             TestApplication.start(UnfitApplication, environment=environment)
+
+
+@application_module_test("tests.pytest_testing.depot.deliveries", application=DepotApplication, database=POSTGRESQL)
+def test_a_slice_runs_every_migration_of_the_application(deliveries: Autowired[DeliveryRecords]) -> None:
+    # snakeboot's own tables come with the shelves' migrations, which this slice leaves out; migrate runs them all.
+    deliveries.save(DeliveryRecord(uuid4(), "ann"))
+
+    assert deliveries.count() == 1
 
 
 def test_closing_the_database_of_a_test_drops_its_copy() -> None:

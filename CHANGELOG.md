@@ -8,6 +8,45 @@ a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
 - Connecting to the PostgreSQL server of `[database]` gives up after 10 seconds, like the `connectTimeout` of
   PostgreSQL's JDBC driver. Before, psycopg waited 130 seconds per address, and on Windows even a refused connection
   failed only then: `migrate` or the start seemed to hang for over four minutes when the server was not running.
+- A `@test_component` nested in a test class holds for that class only, like a static nested `@TestConfiguration`: a
+  hand-written fake for a few tests, which wins over the project's test component of the same component. A pytest
+  class nested in it sees it too, as a JUnit `@Nested` class does, and the innermost wins; beside a `MockComponent` of
+  the same component in the same class, it stops the test. The source scan no longer counts a class nested in a class
+  or a function as one of the project's test components or applications. **Breaking:** a `@test_component` grouped in
+  a plain class (`class Doubles:`) held for every test before; it now holds for that class only, so move it to the
+  module's top level.
+- A `@rabbit_listener` message that keeps failing is no longer lost (#1), as in Spring Boot: the optional table
+  `[rabbitmq.listener.retry]` (`max_attempts`, `initial_interval`, `multiplier`, `max_interval`, like
+  `spring.rabbitmq.listener.simple.retry.*`) tries it again with exponential back-off, and
+  `@rabbit_listener(..., dead_letter=True)` declares the durable queue `<queue>.dead-letter`, where RabbitMQ then
+  moves what the listener refuses for good, as Spring's `RejectAndDontRequeueRecoverer` does with the queue's
+  `x-dead-letter-exchange`. `RejectAndDontRequeueError` and an unreadable body are still refused at once, without a
+  retry. Without the table a message is tried three times, a second apart, as before; during a pause the connection
+  keeps answering the broker's heartbeats.
+- The start-up declares the exchange, queues and binding of every listener before any consumes, and a declaration
+  RabbitMQ refuses stops it with `AmqpDeclarationError`, instead of a listener that tries again every five seconds
+  as if the broker were down. A queue that exists without the dead-letter queue its listener now asks for is one:
+  the message says how to migrate it (delete the queue while it is empty, or use a policy), and so does the README.
+- `InProcessRabbitTemplate.dead_lettered` holds what a listener with `dead_letter=True` refused, and every
+  `RefusedMessage` has its `dead_letter_queue` (None without one).
+- **Breaking:** on SQLite in memory, `@application_test` runs the application's own migrations instead of creating
+  the tables from the entities, like Flyway on H2 in Spring Boot's tests: the scripts `migrate` runs, once per
+  process, in a template database that every test copies. First the migrated schema is compared with the entities,
+  like `ddl-auto=validate`: a table, column, NOT NULL or index the migrations lack stops every test, with the SQL
+  `make_migration` would still write (the types are compared on PostgreSQL only, as SQLite takes any type name). A
+  migration that SQLite rejects stops them too, with its name, and so does a generated key that SQLite would not
+  number (declared otherwise than `INTEGER PRIMARY KEY`, such as `BIGSERIAL`). To move: let `make_migration` write
+  what the migrations lack, snakeboot's own tables included; an application whose migrations need PostgreSQL's own
+  SQL runs its tests with `@application_test(database=PostgreSQLContainer())`. An application without migrations
+  keeps the tables of its entities.
+- A slice (`@web_test`, `@application_module_test`) runs every migration of the application, on SQLite and on
+  PostgreSQL alike, as `migrate` does, instead of those of the contexts it starts: snakeboot's own tables, or a table
+  another context's migration changes, are there.
+- The SQLite of a test keeps a UUID as text with its dashes: in a column a migration declared `UUID`, which SQLite
+  reads as a number where it can, `UUID(int=7)` would have become 7.
+- `in_memory_database(entity_types, migrations=...)` returns a database on that schema, `in_memory_database()` an
+  empty one as before; `postgresql_database(image, entity_types, migrations=...)` runs the migrations given.
+- A test that replaces the `Database` with its own gets it as it gave it: snakeboot creates no tables in it.
 
 ## 0.12.0
 

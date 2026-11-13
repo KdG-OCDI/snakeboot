@@ -405,15 +405,50 @@ def send_hourly_report(self) -> None: ...
 method of a component consume a queue, like `@RabbitListener` with `@QueueBinding`: the durable topic exchange, the
 queue and the binding are declared at start-up, the JSON body becomes the pydantic model, `dict` or `bytes` the method
 takes, and each listener has a thread and a connection of its own. Returning acknowledges the message;
-`RejectAndDontRequeueError` or an unreadable body refuses it for good; another failure is tried three times, then
-refused. The `RabbitTemplate` sends persistent JSON, confirmed by the broker. `[rabbitmq.listener] auto_startup =
-false` keeps a process from consuming.
+`RejectAndDontRequeueError` or an unreadable body refuses it for good at once; another failure, such as a database
+that is down, is tried again as `[rabbitmq.listener.retry]` says, like `spring.rabbitmq.listener.simple.retry.*`
+(without the table three times, a second apart), then refused. RabbitMQ drops a refused message, unless the listener
+has `dead_letter=True`: then it moves to the durable queue `<queue>.dead-letter`, as Spring's
+`RejectAndDontRequeueRecoverer` does with a queue's `x-dead-letter-exchange`, to be looked at or moved back by hand,
+with RabbitMQ's `x-death` header saying where and why. The `RabbitTemplate` sends persistent JSON, confirmed by the
+broker. `[rabbitmq.listener] auto_startup = false` keeps a process from consuming.
 
 ```python
 @injectable
 class GameStartedListener:
-    @rabbit_listener(queue="tictactoe.game-started", exchange="games", routing_key="game.tictactoe.started")
+    @rabbit_listener(
+        queue="tictactoe.game-started",
+        exchange="games",
+        routing_key="game.tictactoe.started",
+        dead_letter=True,  # what it refuses is kept in tictactoe.game-started.dead-letter
+    )
     def on_game_started(self, message: GameStartedMessage) -> None: ...  # a pydantic model
+```
+
+```toml
+[rabbitmq.listener.retry]   # optional, all four keys
+max_attempts = 6            # then the message is refused for good
+initial_interval = 2        # seconds, or "PT2S"; then 4, 8, 16 and 30 s: a database may be down for a minute
+multiplier = 2
+max_interval = 30
+```
+
+The listener holds the message while it waits (prefetch 1), so the messages behind it wait too, and its connection
+keeps answering the broker's heartbeats. Before any listener consumes, the start-up declares every exchange, queue
+and binding, and a declaration RabbitMQ refuses stops it (`AmqpDeclarationError`). RabbitMQ does not change the
+arguments of a queue that exists, so turning `dead_letter` on, or off, for a queue that is there already stops the
+start-up with RabbitMQ's `PRECONDITION_FAILED` and two ways to migrate the queue:
+
+* Delete it while it is empty, and start the new version, which declares it anew: `rabbitmqctl delete_queue
+  tictactoe.game-started --if-empty`, or the management UI. A message sent in between reaches no queue, so do it while
+  the senders are quiet.
+* Or keep it, leave `dead_letter` out, and give it the dead-letter queue through a policy, which RabbitMQ applies to
+  a queue that exists; declare `tictactoe.game-started.dead-letter` too (the refused start-up did). A queue follows one
+  policy, the one with the highest priority, so add these keys to a policy that applies already.
+
+```bash
+rabbitmqctl set_policy tictactoe.game-started.dead-letter '^tictactoe\.game-started$' \
+  '{"dead-letter-exchange": "", "dead-letter-routing-key": "tictactoe.game-started.dead-letter"}' --apply-to queues
 ```
 
 **Health and metrics.** Like Spring Boot's actuator, the server answers beside the API, without a token:
@@ -505,21 +540,51 @@ so nothing needs to be emptied between tests, where Spring keeps one context.
 * An unknown type, a test component without a constructor without arguments or two test components for one component
   stop the test before it runs.
 
+A test component nested in a test class holds for that class only, like a static nested `@TestConfiguration`: a
+hand-written fake for a few tests, where the project's own test component, or the application's component, holds for
+the others. A class nested in it sees it too, as a JUnit `@Nested` class does, and for one component the innermost
+wins. Beside a `MockComponent` of the same component in the same class, it stops the test.
+
+```python
+@application_test
+class TestWithARepositoryThatLosesTheUpdate:
+    @test_component(replaces=AuctionRepositoryPort)  # for the tests of this class only
+    class RepositoryThatLosesTheUpdate:
+        def get(self, auction_id: AuctionId) -> Auction:
+            return an_auction()
+
+        def save(self, auction: Auction) -> None:
+            raise AuctionChangedMeanwhileError("Another bid came in meanwhile.")
+
+    client: Autowired[RestClient]
+
+    def test_a_lost_update_answers_409(self) -> None:
+        response = self.client.post(f"/api/auctions/{AUCTION}/bids", json={"amount": 120}, headers=signed_in_as(...))
+
+        assert response.status_code == 409
+```
+
 The infrastructure of a test is snakeboot's own, so nothing outside the test runs:
 
-* **The database** is a fresh SQLite in memory whose tables come from the entities. What SQLite cannot show (a
-  `Vector`'s similarity search, `@lock`, PostgreSQL's own SQL in an `@query`, a constraint only the migrations have)
-  runs on PostgreSQL, in a container, like Testcontainers' `PostgreSQLContainer` with `@ServiceConnection`:
-  `@application_test(database=PostgreSQLContainer("pgvector/pgvector:pg17"))`. The application's own migrations
-  build the schema, once per process, and every test gets a copy of it (`CREATE DATABASE ... TEMPLATE`, a tenth of a
-  second). First the migrated schema is compared with the entities, like Hibernate's `ddl-auto=validate`: a change
-  `make_migration` would still write stops the tests, with that SQL. It needs Docker and `snakeboot[testcontainers]`.
+* **The database** is a fresh SQLite in memory, built by the application's own migrations, like Flyway's on H2 in
+  Spring Boot's tests: the scripts `migrate` runs, all of them, also in a slice. They run once per process, and every
+  test gets a copy of the result. First the migrated schema is compared with the entities, like Hibernate's
+  `ddl-auto=validate`: a table, column, NOT NULL or index the migrations lack stops the tests, with the SQL
+  `make_migration` would still write. SQLite takes the type names of a migration as they come, so the types are
+  compared on PostgreSQL. An application without migrations gets the tables of its entities.
+* What SQLite cannot run or show (a migration in PostgreSQL's own SQL, a `Vector`'s similarity search, `@lock`,
+  PostgreSQL's own SQL in an `@query`) runs on PostgreSQL, in a container, like Testcontainers' `PostgreSQLContainer`
+  with `@ServiceConnection`: `@application_test(database=PostgreSQLContainer("pgvector/pgvector:pg17"))`. A migration
+  that SQLite rejects stops the tests on SQLite with its name. On PostgreSQL the migrations build the schema once per
+  process too, and every test gets a copy of it (`CREATE DATABASE ... TEMPLATE`, a tenth of a second); the comparison
+  with the entities includes the types. It needs Docker and `snakeboot[testcontainers]`.
 * **The events**: `Autowired[PublishedEvents]` holds every event the application published during the test, like
   Spring's `ApplicationEvents` and Spring Modulith's `PublishedEvents`: `[closed] = events.of_type(AuctionClosed)`.
 * **The broker**: with `[rabbitmq]`, the `RabbitTemplate` is an `InProcessRabbitTemplate`, like Spring AMQP's
   `TestRabbitTemplate`. It keeps every message in `sent` and hands it, as the same JSON, to the application's own
   `@rabbit_listener` methods whose queue a topic exchange would route it to, once the sender's transaction committed;
-  what a listener refuses lands in `refused`, and never fails the sender.
+  what a listener refuses lands in `refused` after one attempt, without the retries, and never fails the sender.
+  What a listener with `dead_letter=True` refuses is in `dead_lettered` too, as its dead-letter queue would keep it.
 * **The cache** is an `InMemoryCache`; the `@application_module_listener` methods run on the caller's thread, so what
   they did is there when the call that published returns.
 
@@ -623,4 +688,12 @@ fill and empty:
 ```bash
 docker run -d --rm -p 55432:5432 -e POSTGRES_PASSWORD=snakeboot pgvector/pgvector:pg17
 SNAKEBOOT_TEST_POSTGRESQL_URL=postgresql+psycopg://postgres:snakeboot@localhost:55432/postgres uv run pytest
+```
+
+The RabbitMQ tests (dead letters, queue arguments, heartbeats during a back-off) run when `SNAKEBOOT_TEST_RABBITMQ_URL`
+names a broker on which they may declare and delete queues:
+
+```bash
+docker run -d --rm -p 55672:5672 rabbitmq:4-management
+SNAKEBOOT_TEST_RABBITMQ_URL=amqp://guest:guest@localhost:55672/%2F uv run pytest
 ```

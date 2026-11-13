@@ -27,7 +27,8 @@ class ProjectSources:
     its tests apart from its packages, so snakeboot reads the source on Python's path instead: the directories of
     the project's own code, which an editable install, pytest's `pythonpath` and the folder of the tests put there,
     and never an environment's `site-packages`. It reads the files without importing them, as `declared_classes`
-    does, and imports only the modules with a `@test_component`.
+    does, and imports only the modules with a `@test_component`. It counts the classes an import defines, not those
+    nested in a class or a function: a `@test_component` nested in a test class holds for that class only.
     """
 
     applications: tuple[str, ...]
@@ -39,11 +40,10 @@ class ProjectSources:
         applications: list[str] = []
         modules: list[str] = []
         for module, source in _modules_under(source_roots() if roots is None else roots):
-            for node in ast.walk(source):
-                if isinstance(node, ast.ClassDef):
-                    decorators = decorator_names_of(node)
-                    applications += [f"{module}:{node.name}"] if APPLICATION_ROOT in decorators else []
-                    modules += [module] if TEST_COMPONENT in decorators else []
+            for node in _classes_defined_on_import(source.body):
+                decorators = decorator_names_of(node)
+                applications += [f"{module}:{node.name}"] if APPLICATION_ROOT in decorators else []
+                modules += [module] if TEST_COMPONENT in decorators else []
         return cls(tuple(applications), tuple(dict.fromkeys(modules)))
 
     def application(self) -> type:
@@ -94,6 +94,16 @@ def _modules_under(roots: Iterable[Path]) -> Iterator[tuple[str, ast.Module]]:
                 yield module, ast.parse(text)
             except SyntaxError:
                 continue
+
+
+def _classes_defined_on_import(statements: Iterable[ast.AST]) -> Iterator[ast.ClassDef]:
+    # The classes of the module's body and its blocks (`if`, `try`, `with`), not those of a class or a function body.
+    for statement in statements:
+        if isinstance(statement, ast.ClassDef):
+            yield statement
+        elif not isinstance(statement, ast.FunctionDef | ast.AsyncFunctionDef):
+            blocks = (ast.stmt, ast.excepthandler, ast.match_case)
+            yield from _classes_defined_on_import(c for c in ast.iter_child_nodes(statement) if isinstance(c, blocks))
 
 
 def _python_files(root: Path) -> Iterator[Path]:

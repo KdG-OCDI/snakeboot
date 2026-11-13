@@ -28,7 +28,8 @@ class TestEnvironment:
 
     `profile` activates a profile, like `@ActiveProfiles`, whatever SNAKEBOOT_PROFILE says. `properties` win over the
     files and the environment, like `@SpringBootTest(properties = ...)`: `{"scheduling.auto_startup": False}`.
-    `database` is a `PostgreSQLContainer`, or None for a fresh SQLite in memory whose tables come from the entities.
+    `database` is a `PostgreSQLContainer`, or None for a fresh SQLite in memory that the application's migrations
+    built, like Flyway on H2, or whose tables come from the entities when the application has no migrations.
     """
 
     __test__ = False  # pytest: a class named Test... that is no test class

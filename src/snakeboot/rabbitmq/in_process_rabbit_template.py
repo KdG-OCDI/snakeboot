@@ -31,11 +31,16 @@ class SentMessage:
 
 @dataclass(frozen=True, slots=True)
 class RefusedMessage:
-    """A message a `@rabbit_listener` method did not take: which method, and what it raised."""
+    """A message a `@rabbit_listener` method did not take: which method, what it raised, and where it went.
+
+    `dead_letter_queue` is the listener's dead-letter queue, which RabbitMQ would move the message to, or None when
+    the listener has none and RabbitMQ would drop it.
+    """
 
     message: SentMessage
     listener: str
     error: Exception
+    dead_letter_queue: str | None
 
 
 class InProcessRabbitTemplate(RabbitTemplate):
@@ -46,7 +51,9 @@ class InProcessRabbitTemplate(RabbitTemplate):
     through the method's own conversion and task decorator: one method per queue, as a queue's consumers share it. It
     hands the message over once the sender's transaction committed, or at once outside one, so the listener works in
     a transaction of its own, as it would on a thread of its own. As with a broker, a listener that fails does not
-    fail the sender: the message lands in `refused`, with the error, after one attempt.
+    fail the sender: the message lands in `refused`, with the error, after one attempt (the retries of
+    `[rabbitmq.listener.retry]` are left out, so a test does not wait for them). What a listener with
+    `dead_letter=True` refuses is also in `dead_lettered`, as its dead-letter queue would keep it.
     """
 
     def __init__(self, components: ApplicationComponents) -> None:  # the broker's connection factory is left out
@@ -55,6 +62,12 @@ class InProcessRabbitTemplate(RabbitTemplate):
         self._lock = threading.Lock()
         self.sent: list[SentMessage] = []
         self.refused: list[RefusedMessage] = []
+
+    @property
+    def dead_lettered(self) -> list[RefusedMessage]:
+        """Every refused message that a dead-letter queue would keep, in the order they were refused."""
+        with self._lock:
+            return [refused for refused in self.refused if refused.dead_letter_queue is not None]
 
     @override
     def convert_and_send(
@@ -79,8 +92,9 @@ class InProcessRabbitTemplate(RabbitTemplate):
                 endpoint.receive(message.body)
             except Exception as error:  # as with a broker, a failing listener never fails the sender
                 logger.warning("%s refused a message to %s", endpoint.name, message.routing_key, exc_info=True)
+                refused = RefusedMessage(message, endpoint.name, error, endpoint.mapping.dead_letter_queue)
                 with self._lock:
-                    self.refused.append(RefusedMessage(message, endpoint.name, error))
+                    self.refused.append(refused)
 
     def _listeners(self) -> list[RabbitListenerEndpoint]:
         # Found at the first message, not when the application starts: their components then get the test's doubles.

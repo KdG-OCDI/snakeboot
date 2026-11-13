@@ -31,7 +31,11 @@ from snakeboot.configuration.events_properties import EventsProperties
 from snakeboot.configuration.load_configuration import begin_configuration, load_configuration
 from snakeboot.configuration.logging_properties import LoggingProperties
 from snakeboot.configuration.oauth2_properties import OAuth2Properties
-from snakeboot.configuration.rabbitmq_properties import RabbitListenerProperties, RabbitProperties
+from snakeboot.configuration.rabbitmq_properties import (
+    RabbitListenerProperties,
+    RabbitListenerRetryProperties,
+    RabbitProperties,
+)
 from snakeboot.configuration.scheduling_properties import SchedulingProperties
 from snakeboot.configuration.section import Section
 from snakeboot.configuration.section_prefix import sections_declared_in
@@ -51,6 +55,7 @@ __all__ = [
     "LoggingProperties",
     "OAuth2Properties",
     "RabbitListenerProperties",
+    "RabbitListenerRetryProperties",
     "RabbitProperties",
     "SchedulingProperties",
     "Section",

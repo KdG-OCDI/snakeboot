@@ -15,7 +15,7 @@ def rabbit_properties(*, auto_startup: bool = True) -> RabbitProperties:
         username="guest",
         password=SecretStr("guest"),
         virtual_host="/",
-        listener=RabbitListenerProperties(auto_startup=auto_startup),
+        listener=RabbitListenerProperties(auto_startup=auto_startup, retry=None),
     )
 
 

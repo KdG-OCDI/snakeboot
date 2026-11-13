@@ -78,6 +78,32 @@ def test_a_body_the_listener_cannot_read_is_refused(rabbit: Autowired[InProcessR
 
 
 @parcels_test
+def test_what_a_listener_with_a_dead_letter_queue_refuses_is_kept_as_dead_lettered(
+    rabbit: Autowired[InProcessRabbitTemplate],
+) -> None:
+    unknown = uuid4()
+
+    rabbit.convert_and_send("parcels", f"parcel.{unknown}.delivered", ParcelDeliveredMessage(parcel_id=unknown))
+
+    [dead_lettered] = rabbit.dead_lettered
+    assert dead_lettered.dead_letter_queue == "parcels.delivered.dead-letter"
+    assert dead_lettered.message.json() == {"parcel_id": str(unknown)}
+    assert rabbit.refused == [dead_lettered]
+
+
+@parcels_test
+def test_what_a_listener_without_a_dead_letter_queue_refuses_is_not_dead_lettered(
+    rabbit: Autowired[InProcessRabbitTemplate],
+) -> None:
+    rabbit.convert_and_send("parcels", "parcel.42.weighed", ["no", "object"])  # only the carrier hears parcel.42.*
+
+    [refused] = rabbit.refused
+    assert refused.listener.endswith("CarrierListener.on_parcel")
+    assert refused.dead_letter_queue is None
+    assert rabbit.dead_lettered == []
+
+
+@parcels_test
 def test_the_message_of_a_transaction_that_rolls_back_reaches_no_listener(
     rabbit: Autowired[InProcessRabbitTemplate], carrier: Autowired[CarrierListener]
 ) -> None:

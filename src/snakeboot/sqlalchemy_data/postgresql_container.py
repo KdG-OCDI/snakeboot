@@ -27,16 +27,20 @@ class ContainerUnavailableError(RuntimeError):
     """Raised when the PostgreSQL of a test cannot start: Docker is not running, or Testcontainers is missing."""
 
 
-def postgresql_database(image: str, entity_types: Iterable[type]) -> Database:
+def postgresql_database(
+    image: str, entity_types: Iterable[type], *, migrations: Sequence[Migration] | None = None
+) -> Database:
     """Returns a fresh database on the PostgreSQL in a container of `image`, built by the application's migrations.
 
-    The container starts with the first test that asks for `image` and stops when the process ends. The migrations of
-    `entity_types` run once, in a template database that is then compared with the entities: when `make_migration`
-    would still write something, every test on it stops with that SQL (`InvalidMigrationError`). Every test gets a
-    copy of the template; closing the database drops the copy.
+    The container starts with the first test that asks for `image` and stops when the process ends. The migrations
+    next to `entity_types`, or `migrations`, run once, in a template database that is then compared with the entities:
+    when `make_migration` would still write something, every test on it stops with that SQL (`InvalidMigrationError`).
+    Every test gets a copy of the template; closing the database drops the copy.
     """
+    mapping = EntityMapping.of(entity_types)
+    found = migrations_in(migration_locations(mapping.entity_types)) if migrations is None else migrations
     server = _server_of(image)
-    return server.copy_of(server.template_for(EntityMapping.of(entity_types)))
+    return server.copy_of(server.template_for(mapping, found))
 
 
 def _server_of(image: str) -> "_PostgreSQLServer":
@@ -71,9 +75,8 @@ class _PostgreSQLServer:
         atexit.register(container.stop)
         return cls(make_url(container.get_connection_url()))
 
-    def template_for(self, mapping: EntityMapping) -> str:
-        """Returns the template database the migrations of `mapping` built, building it the first time."""
-        migrations = migrations_in(migration_locations(mapping.entity_types))
+    def template_for(self, mapping: EntityMapping, migrations: Sequence[Migration]) -> str:
+        """Returns the template database `migrations` built for `mapping`, building it the first time."""
         key = _fingerprint(mapping, migrations)
         with self._lock:
             if key not in self._templates:

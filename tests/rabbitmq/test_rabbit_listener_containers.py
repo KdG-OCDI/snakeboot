@@ -1,17 +1,28 @@
 """Every `@rabbit_listener` method consumes its queue on a thread of its own, and settles messages as Spring does."""
 
+import time
 from collections.abc import Iterator
+from itertools import islice
 
 import pytest
 
-from snakeboot.rabbitmq import InvalidRabbitListenerError, ListenerTiming, RabbitListenerContainers
-from tests.rabbitmq.fake_broker import FakeBroker
+from snakeboot.rabbitmq import (
+    AmqpDeclarationError,
+    InvalidRabbitListenerError,
+    ListenerTiming,
+    RabbitListenerContainers,
+)
+from tests.rabbitmq.fake_broker import FakeBroker, FakeChannel
+from tests.rabbitmq.sample_listeners.dead_letter.listeners import GameFinishedListener
 from tests.rabbitmq.sample_listeners.working.listeners import GameStartedListener
 from tests.rabbitmq.stand_ins import connection_factory_of
 from tests.scheduling.stand_ins import CountingTaskDecorator, ScannedComponents
 
 WORKING = "tests.rabbitmq.sample_listeners.working"
+DEAD_LETTER = "tests.rabbitmq.sample_listeners.dead_letter"
 QUEUE = "tictactoe.game-started"
+FINISHED_QUEUE = "platform.game-finished"
+DEAD_LETTER_QUEUE = "platform.game-finished.dead-letter"
 QUICK = ListenerTiming(reconnect_seconds=0.01, retry_pause_seconds=0, poll_seconds=0.01, shutdown_seconds=2)
 WAIT_SECONDS = 5
 
@@ -46,6 +57,10 @@ def settled(broker: FakeBroker) -> None:
     assert broker.settled.wait(WAIT_SECONDS), "the listener settled no message"
 
 
+def consuming_channels(broker: FakeBroker) -> list[FakeChannel]:
+    return [channel for connection in broker.connections for channel in connection.channels if channel.consumers]
+
+
 def test_declares_a_durable_topic_exchange_a_durable_queue_and_the_binding(
     containers: RabbitListenerContainers, broker: FakeBroker, listener: GameStartedListener
 ) -> None:
@@ -54,9 +69,9 @@ def test_declares_a_durable_topic_exchange_a_durable_queue_and_the_binding(
     settled(broker)
 
     assert broker.exchanges == {"games": ("topic", True)}
-    assert broker.queues == {QUEUE}
-    assert broker.bindings == [(QUEUE, "games", "game.tictactoe.started")]
-    assert broker.connections[0].channels[0].prefetch == 1
+    assert broker.queues == {QUEUE: {}}
+    assert broker.bindings == {(QUEUE, "games", "game.tictactoe.started")}
+    assert [channel.prefetch for channel in consuming_channels(broker)] == [1]
 
 
 def test_a_message_becomes_the_model_the_method_takes_and_is_acknowledged(
@@ -131,7 +146,7 @@ def test_a_failure_that_passes_is_only_a_delay(
 def test_a_message_that_failed_once_is_not_lost_when_the_application_stops(
     broker: FakeBroker, listener: GameStartedListener, decorator: CountingTaskDecorator
 ) -> None:
-    patient = ListenerTiming(retry_pause_seconds=30, poll_seconds=0.01, shutdown_seconds=2)
+    patient = ListenerTiming(retry_pause_seconds=30, max_retry_pause_seconds=30, poll_seconds=0.01, shutdown_seconds=2)
     containers = RabbitListenerContainers(
         ScannedComponents(WORKING, listener),
         decorator,
@@ -147,6 +162,139 @@ def test_a_message_that_failed_once_is_not_lost_when_the_application_stops(
     containers.stop()
 
     assert broker.rejected == [(1, True)]
+
+
+def test_the_pause_between_two_attempts_grows_by_the_multiplier_up_to_the_longest() -> None:
+    timing = ListenerTiming(retry_pause_seconds=1, retry_multiplier=2, max_retry_pause_seconds=5)
+
+    assert list(islice(timing.retry_pauses(), 5)) == [1, 2, 4, 5, 5]
+
+
+def test_without_a_timing_a_message_is_tried_three_times_a_second_apart() -> None:
+    timing = ListenerTiming()
+
+    assert (timing.attempts, list(islice(timing.retry_pauses(), 2))) == (3, [1, 1])
+
+
+def test_a_failing_message_is_tried_as_often_as_the_timing_says_while_the_connection_sleeps_between_attempts(
+    broker: FakeBroker, listener: GameStartedListener, decorator: CountingTaskDecorator
+) -> None:
+    backing_off = ListenerTiming(
+        attempts=4, retry_pause_seconds=0.1, retry_multiplier=2, max_retry_pause_seconds=0.25, poll_seconds=1
+    )
+    containers = RabbitListenerContainers(
+        ScannedComponents(WORKING, listener),
+        decorator,
+        connection_factory_of(broker),
+        auto_startup=True,
+        timing=backing_off,
+    )
+    containers.start()
+    try:
+        broker.deliver(QUEUE, b'{"session_id": "crash", "player_ids": []}')
+        settled(broker)
+    finally:
+        containers.stop()
+
+    assert listener.attempts["crash"] == 4
+    assert broker.rejected == [(1, False)]
+    assert len(broker.slept) == 3  # one sleep per pause of 0.1, 0.2 and 0.25 s, each shorter than a poll
+    assert sum(broker.slept) == pytest.approx(0.55, abs=0.05)
+
+
+@pytest.fixture
+def dead_letter_listener() -> GameFinishedListener:
+    return GameFinishedListener()
+
+
+@pytest.fixture
+def dead_letter_containers(
+    broker: FakeBroker, dead_letter_listener: GameFinishedListener, decorator: CountingTaskDecorator
+) -> Iterator[RabbitListenerContainers]:
+    components = ScannedComponents(DEAD_LETTER, dead_letter_listener)
+    containers = RabbitListenerContainers(
+        components, decorator, connection_factory_of(broker), auto_startup=True, timing=QUICK
+    )
+    yield containers
+    containers.stop()
+
+
+def test_a_listener_with_a_dead_letter_queue_declares_it_and_names_it_in_the_arguments_of_its_queue(
+    dead_letter_containers: RabbitListenerContainers, broker: FakeBroker
+) -> None:
+    dead_letter_containers.start()
+
+    assert broker.queues == {
+        FINISHED_QUEUE: {"x-dead-letter-exchange": "", "x-dead-letter-routing-key": DEAD_LETTER_QUEUE},
+        DEAD_LETTER_QUEUE: {},
+    }
+    assert broker.bindings == {(FINISHED_QUEUE, "games", "game.*.finished")}
+
+
+@pytest.mark.parametrize(
+    ("session_id", "attempts"),
+    [("refuse", 1), ("crash", 3)],
+    ids=["refused by the listener, without a retry", "failing on every attempt"],
+)
+def test_a_message_refused_for_good_is_rejected_without_requeue_for_rabbitmq_to_dead_letter_it(
+    dead_letter_containers: RabbitListenerContainers,
+    broker: FakeBroker,
+    dead_letter_listener: GameFinishedListener,
+    session_id: str,
+    attempts: int,
+) -> None:
+    dead_letter_containers.start()
+    broker.deliver(FINISHED_QUEUE, f'{{"session_id": "{session_id}"}}'.encode())
+    settled(broker)
+
+    assert dead_letter_listener.attempts[session_id] == attempts
+    assert broker.rejected == [(1, False)]
+
+
+def test_a_queue_that_exists_without_its_dead_letter_queue_stops_the_start_up_and_says_how_to_migrate(
+    dead_letter_containers: RabbitListenerContainers, broker: FakeBroker
+) -> None:
+    broker.queues[FINISHED_QUEUE] = {}
+
+    with pytest.raises(AmqpDeclarationError) as refused:
+        dead_letter_containers.start()
+
+    message = str(refused.value)
+    assert "PRECONDITION_FAILED" in message
+    assert f"rabbitmqctl delete_queue {FINISHED_QUEUE} --if-empty" in message
+    assert f"rabbitmqctl set_policy {DEAD_LETTER_QUEUE} '^platform\\.game\\-finished$'" in message
+    assert f'"dead-letter-routing-key": "{DEAD_LETTER_QUEUE}"' in message
+    assert dead_letter_containers.running == 0
+
+
+def test_a_queue_that_would_lose_its_dead_letter_queue_stops_the_start_up(
+    containers: RabbitListenerContainers, broker: FakeBroker
+) -> None:
+    broker.queues[QUEUE] = {"x-dead-letter-exchange": "", "x-dead-letter-routing-key": f"{QUEUE}.dead-letter"}
+
+    with pytest.raises(AmqpDeclarationError, match="give the listener dead_letter=True again"):
+        containers.start()
+
+
+def test_a_declaration_refused_after_the_start_up_is_tried_again_until_the_queue_is_migrated(
+    dead_letter_containers: RabbitListenerContainers,
+    broker: FakeBroker,
+    dead_letter_listener: GameFinishedListener,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    broker.unreachable_attempts = 1  # down while the application starts, so the start-up cannot check
+    broker.queues[FINISHED_QUEUE] = {}
+    dead_letter_containers.start()
+    deadline = time.monotonic() + WAIT_SECONDS
+    while not any(record.levelname == "ERROR" and "delete_queue" in record.getMessage() for record in caplog.records):
+        assert time.monotonic() < deadline, "the refused declaration was not logged"
+        time.sleep(0.01)
+
+    del broker.queues[FINISHED_QUEUE]  # what `rabbitmqctl delete_queue` does
+    broker.deliver(FINISHED_QUEUE, b'{"session_id": "s1"}')
+    settled(broker)
+
+    assert dead_letter_listener.finished == ["s1"]
 
 
 def test_a_listener_waits_for_a_broker_that_is_down(

@@ -4,14 +4,24 @@ These tests run through snakeboot's pytest plugin, as an application's tests do.
 of snakeboot's own tests holds many. `test_plugin_in_a_project.py` checks that a project with one finds it alone.
 """
 
-from datetime import timedelta
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import override
 
 import pytest
 
 from snakeboot.boot.testing import RestClient
 from snakeboot.cache import Cache, InMemoryCache
-from snakeboot.testing import Autowired, MockComponent, SpyComponent, application_test, signed_in_as, verify, when
+from snakeboot.testing import (
+    Autowired,
+    MockComponent,
+    SpyComponent,
+    application_test,
+    signed_in_as,
+    test_component,
+    verify,
+    when,
+)
 from snakeboot.testing.application_marker import APPLICATION_TEST_FIXTURE
 from tests.pytest_testing.fixed_clock import START, FixedClock
 from tests.pytest_testing.notebook.notebook_application import NotebookApplication
@@ -28,6 +38,8 @@ from tests.pytest_testing.notebook.notes import (
 notebook_test = application_test(application=NotebookApplication)
 
 AS_A_WRITER = signed_in_as("ann", roles={"writer"})
+
+MIDNIGHT = datetime(2026, 11, 12, tzinfo=UTC)
 
 
 @notebook_test
@@ -115,6 +127,63 @@ class TestAMockReplacesItsComponent:
 
     def test_every_test_gets_a_mock_of_its_own(self) -> None:
         verify(self.board.pin).never_called()
+
+
+@notebook_test
+class TestATestComponentNestedInTheClass:
+    @test_component(replaces=NoticeBoard)
+    class BoardThatIsDown:
+        def pin(self, text: str) -> None:
+            raise ConnectionError("The notice board is down.")
+
+    @test_component(replaces=Clock)
+    class StoppedClock(Clock):
+        @override
+        def now(self) -> datetime:
+            return MIDNIGHT
+
+    client: Autowired[RestClient]
+    clock: Autowired[Clock]
+
+    def test_it_replaces_its_component_for_the_tests_of_the_class(self) -> None:
+        with pytest.raises(ConnectionError, match="The notice board is down"):
+            self.client.post("/api/notes", json={"text": "hello"}, headers=AS_A_WRITER)
+
+    def test_it_wins_over_the_test_component_of_the_project(self) -> None:
+        assert self.clock.now() == MIDNIGHT
+
+    def test_it_is_found_by_its_own_type(self, board: Autowired[BoardThatIsDown]) -> None:
+        assert isinstance(board, TestATestComponentNestedInTheClass.BoardThatIsDown)
+
+    @notebook_test
+    class TestANestedClass:
+        @test_component(replaces=NoticeBoard)
+        class BoardThatRemembers:
+            def __init__(self) -> None:
+                self.pinned: list[str] = []
+
+            def pin(self, text: str) -> None:
+                self.pinned.append(text)
+
+        client: Autowired[RestClient]
+        clock: Autowired[Clock]
+        board: Autowired[BoardThatRemembers]
+
+        def test_it_sees_the_test_components_of_the_classes_around_it(self) -> None:
+            assert self.clock.now() == MIDNIGHT
+
+        def test_its_own_win_over_those_of_the_classes_around_it(self) -> None:
+            response = self.client.post("/api/notes", json={"text": "hello"}, headers=AS_A_WRITER)
+
+            assert (response.status_code, self.board.pinned) == (201, ["hello"])
+
+
+@notebook_test
+def test_a_test_component_nested_in_a_class_holds_nowhere_else(
+    clock: Autowired[Clock], board: Autowired[NoticeBoard]
+) -> None:
+    assert isinstance(clock, FixedClock)
+    assert isinstance(board, LoggedNoticeBoard)
 
 
 @notebook_test

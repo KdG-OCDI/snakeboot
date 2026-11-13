@@ -57,13 +57,14 @@ class TestApplication:
 
     The application starts as it does for real, from its application.toml and the active profile, with these
     differences: `overrides` replace components with doubles; with `[database]` the database is a fresh SQLite in
-    memory whose tables come from the entities, as Spring Boot's tests create the schema from JPA's metamodel, or a
-    copy of a PostgreSQL that the application's migrations built (`TestEnvironment.database`); with `[cache]` the
-    cache is an `InMemoryCache`; with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own
-    `@rabbit_listener` methods, without a broker (`InProcessRabbitTemplate`); the `@application_module_listener`
-    methods run on the caller's thread, so what they did is there when the call that published returns; every event
-    is kept in `published_events`; the API accepts the tokens of `signed_in_as` next to its own, and with `[oauth2]`
-    the tokens its `AuthorizationServer` signs (`snakeboot.oauth2.testing`). `local_server()` serves it over HTTP.
+    memory that the application's migrations built and that was checked against the entities, as Spring Boot's tests
+    run Flyway on H2 with `ddl-auto=validate` (without migrations, the tables of the entities), or a copy of a
+    PostgreSQL that the migrations built (`TestEnvironment.database`); with `[cache]` the cache is an `InMemoryCache`;
+    with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own `@rabbit_listener` methods,
+    without a broker (`InProcessRabbitTemplate`); the `@application_module_listener` methods run on the caller's
+    thread, so what they did is there when the call that published returns; every event is kept in
+    `published_events`; the API accepts the tokens of `signed_in_as` next to its own, and with `[oauth2]` the tokens
+    its `AuthorizationServer` signs (`snakeboot.oauth2.testing`). `local_server()` serves it over HTTP.
 
     `snakeboot.testing.application_test` starts it for a test and injects what the test asks for.
     """
@@ -109,9 +110,10 @@ class TestApplication:
             properties=environment.properties,
         )
         explicit = dict(overrides or {})
-        doubles = _Doubles(_test_services(context, environment, explicit), explicit, joining=only is not None)
+        services = _test_services(context, environment, explicit, application=application)
+        doubles = _Doubles(services, explicit, joining=only is not None)
         try:
-            return cls._started(context, environment=environment, doubles=doubles, test_components=test_components)
+            return cls._started(context, doubles=doubles, test_components=test_components)
         except WireupError as error:
             _close(doubles.services.values())
             if only is None:
@@ -209,7 +211,6 @@ class TestApplication:
         cls,
         context: ApplicationContext,
         *,
-        environment: TestEnvironment,
         doubles: "_Doubles",
         test_components: Mapping[Any, object] | None,
     ) -> Self:
@@ -217,8 +218,6 @@ class TestApplication:
         context.refresh(doubles.replacing(), additions=[*additions, *doubles.joining_the_container()])
         replacements = {**doubles.services, **doubles.explicit}
         replacements |= _replaced_where_present(context, test_components or {}, replacements)
-        if DatabaseProperties in context.configuration.sections and environment.database is None:
-            _create_tables(context)
         # What the test made for itself, it closes: the database of a test drops its PostgreSQL copy.
         started = cls(context, replacements, extras=extras, owned=list(doubles.services.values()))
         started._accept_signed_in_tokens()
@@ -348,13 +347,17 @@ def _recording(events: PublishedEvents) -> object:
 
 
 def _test_services(
-    context: ApplicationContext, environment: TestEnvironment, overrides: Mapping[Any, object]
+    context: ApplicationContext,
+    environment: TestEnvironment,
+    overrides: Mapping[Any, object],
+    *,
+    application: type,
 ) -> dict[Any, object]:
     """The executor, the database, the cache and the broker of a test, in place of the application's own."""
     sections = context.configuration.sections
     services: dict[Any, object] = {TaskExecutor: SyncTaskExecutor()}
     if DatabaseProperties in sections:
-        services |= _test_database(context, environment, overrides)
+        services |= _test_database(context, environment, overrides, application=application)
     if CacheProperties in sections and Cache not in overrides:
         services[Cache] = InMemoryCache()
     if RabbitProperties in sections:
@@ -363,17 +366,28 @@ def _test_services(
 
 
 def _test_database(
-    context: ApplicationContext, environment: TestEnvironment, overrides: Mapping[Any, object]
+    context: ApplicationContext,
+    environment: TestEnvironment,
+    overrides: Mapping[Any, object],
+    *,
+    application: type,
 ) -> dict[Any, object]:
+    """The database of a test, on the schema the migrations of the whole `application` build, as `migrate` runs them,
+    also when `context` starts a slice of it; the entities of `context` are what the schema is checked against."""
     from snakeboot.data import ENTITY_ATTRIBUTE  # noqa: PLC0415  # reason: only an application with a database
     from snakeboot.sqlalchemy_data import Database  # noqa: PLC0415  # reason: as above
+    from snakeboot.sqlalchemy_data.schema_migrations import migration_locations, migrations_in  # noqa: PLC0415  # reason: as above
     from snakeboot.sqlalchemy_data.testing import in_memory_database, postgresql_database  # noqa: PLC0415  # reason: as above
 
     if Database in overrides:
         return {}
+    entity_types = context.classes_marked(ENTITY_ATTRIBUTE)
+    sliced = context.application is not application
+    every_entity = ComponentScan.of(application).classes_marked(ENTITY_ATTRIBUTE) if sliced else entity_types
+    migrations = migrations_in(migration_locations(every_entity))
     if environment.database is None:
-        return {Database: in_memory_database()}
-    return {Database: postgresql_database(environment.database.image, context.classes_marked(ENTITY_ATTRIBUTE))}
+        return {Database: in_memory_database(entity_types, migrations=migrations)}
+    return {Database: postgresql_database(environment.database.image, entity_types, migrations=migrations)}
 
 
 def _in_process_rabbit(context: ApplicationContext, overrides: Mapping[Any, object]) -> dict[Any, object]:
@@ -402,14 +416,6 @@ def _replaced_where_present(
                 continue
             replaced[component_type] = component
     return replaced
-
-
-def _create_tables(context: ApplicationContext) -> None:
-    from snakeboot.sqlalchemy_data import Database  # noqa: PLC0415  # reason: only an application with a database
-    from snakeboot.sqlalchemy_data.entity_mapping import EntityMapping  # noqa: PLC0415  # reason: as above
-
-    mapping = context.get(EntityMapping)
-    mapping.metadata.create_all(context.get(Database).engine, tables=mapping.tables)
 
 
 def _narrowed(application: type, only: ApplicationSlice | None) -> type:

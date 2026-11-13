@@ -71,12 +71,13 @@ class SendParcel:
 
 @injectable
 class ParcelDeliveredListener:
-    """Hears from the carrier that a parcel arrived; an unknown parcel is refused for good."""
+    """Hears from the carrier that a parcel arrived; an unknown parcel is refused for good, into the dead-letter
+    queue."""
 
     def __init__(self, parcels: ParcelRecords) -> None:
         self._parcels = parcels
 
-    @rabbit_listener(queue="parcels.delivered", exchange=EXCHANGE, routing_key="parcel.*.delivered")
+    @rabbit_listener(queue="parcels.delivered", exchange=EXCHANGE, routing_key="parcel.*.delivered", dead_letter=True)
     @transactional
     def on_parcel_delivered(self, message: ParcelDeliveredMessage) -> None:
         """Marks the parcel delivered."""

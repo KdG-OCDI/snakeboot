@@ -15,10 +15,13 @@ Extra `rabbitmq`.
 
 The broker comes from `[rabbitmq]`; without that section the application has neither listeners nor a template. The
 listeners are a `Lifecycle` component: they consume while an ASGI server serves the application or while
-`run_lifecycle` runs it, and `[rabbitmq.listener] auto_startup = false` keeps a process from consuming.
+`run_lifecycle` runs it, and `[rabbitmq.listener] auto_startup = false` keeps a process from consuming. A failing
+message is tried again as `[rabbitmq.listener.retry]` says, then refused: dropped, or kept in `<queue>.dead-letter`
+for a listener with `@rabbit_listener(..., dead_letter=True)`.
 """
 
 from snakeboot.rabbitmq.in_process_rabbit_template import InProcessRabbitTemplate, RefusedMessage, SentMessage
+from snakeboot.rabbitmq.listener_declaration import AmqpDeclarationError
 from snakeboot.rabbitmq.message_conversion import MessageConversionError
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener import (
@@ -31,6 +34,7 @@ from snakeboot.rabbitmq.rabbit_listener_containers import ListenerTiming, Rabbit
 from snakeboot.rabbitmq.rabbit_template import AmqpPublishError, RabbitTemplate
 
 __all__ = [
+    "AmqpDeclarationError",
     "AmqpPublishError",
     "InProcessRabbitTemplate",
     "InvalidRabbitListenerError",

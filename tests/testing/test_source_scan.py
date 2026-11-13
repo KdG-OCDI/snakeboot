@@ -43,6 +43,49 @@ def test_the_source_names_its_applications_and_the_modules_of_its_test_component
     assert sources.test_component_modules == ("doubles.stub",)
 
 
+NESTED_TEST_COMPONENTS = """\
+from snakeboot.testing import application_test, test_component
+
+
+@application_test
+class TestShop:
+    @test_component(replaces=object)
+    class StubOfTheClass:
+        pass
+
+
+def test_shop() -> None:
+    @test_component(replaces=object)
+    class StubOfTheFunction:
+        pass
+"""
+
+GUARDED_TEST_COMPONENT = """\
+from snakeboot.testing import test_component
+
+try:
+    import shop
+except ImportError:
+    pass
+else:
+    @test_component(replaces=object)
+    class Stub:
+        pass
+"""
+
+
+def test_a_test_component_nested_in_a_class_or_a_function_is_none_of_the_project(tmp_path: Path) -> None:
+    write(tmp_path / "test_shop.py", NESTED_TEST_COMPONENTS)
+
+    assert ProjectSources.scan([tmp_path]).test_component_modules == ()
+
+
+def test_a_test_component_in_a_block_of_the_module_is_one_of_the_project(tmp_path: Path) -> None:
+    write(tmp_path / "doubles.py", GUARDED_TEST_COMPONENT)
+
+    assert ProjectSources.scan([tmp_path]).test_component_modules == ("doubles",)
+
+
 def test_a_file_under_two_roots_takes_its_name_from_the_deepest(tmp_path: Path) -> None:
     write(tmp_path / "src" / "shop" / "shop_application.py", APPLICATION)
 

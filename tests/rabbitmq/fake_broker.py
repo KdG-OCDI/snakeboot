@@ -8,7 +8,7 @@ from dataclasses import dataclass, field
 from types import SimpleNamespace
 from typing import Any
 
-from pika.exceptions import AMQPConnectionError, StreamLostError
+from pika.exceptions import AMQPConnectionError, ChannelClosedByBroker, StreamLostError
 
 type Consumer = Callable[[Any, Any, Any, bytes], None]
 
@@ -25,16 +25,20 @@ class Published:
 
 @dataclass
 class FakeBroker:
-    """Stands in for RabbitMQ: remembers what was declared, delivers what a test hands it, records the outcome."""
+    """Stands in for RabbitMQ: remembers what was declared, delivers what a test hands it, records the outcome.
+
+    Like RabbitMQ, it refuses to declare a queue that exists with other arguments (PRECONDITION_FAILED).
+    """
 
     unreachable_attempts: int = 0
     lost_publishes: int = 0
     exchanges: dict[str, tuple[str, bool]] = field(default_factory=dict)
-    queues: set[str] = field(default_factory=set)
-    bindings: list[tuple[str, str, str]] = field(default_factory=list)
+    queues: dict[str, dict[str, str]] = field(default_factory=dict)
+    bindings: set[tuple[str, str, str]] = field(default_factory=set)
     acked: list[int] = field(default_factory=list)
     rejected: list[tuple[int, bool]] = field(default_factory=list)
     published: list[Published] = field(default_factory=list)
+    slept: list[float] = field(default_factory=list)
     connections: list["FakeConnection"] = field(default_factory=list)
     settled: threading.Event = field(default_factory=threading.Event)
     _pending: "queue.Queue[tuple[str, bytes, dict[str, str] | None]]" = field(default_factory=queue.Queue)
@@ -71,8 +75,9 @@ class FakeBroker:
 class FakeChannel:
     """Stands in for a pika channel."""
 
-    def __init__(self, broker: FakeBroker) -> None:
+    def __init__(self, broker: FakeBroker, connection: "FakeConnection") -> None:
         self._broker = broker
+        self.connection = connection
         self.is_open = True
         self.confirms = False
         self.prefetch = 0
@@ -81,12 +86,17 @@ class FakeChannel:
     def exchange_declare(self, exchange: str, exchange_type: str, durable: bool) -> None:
         self._broker.exchanges[exchange] = (exchange_type, durable)
 
-    def queue_declare(self, queue: str, durable: bool) -> None:
+    def queue_declare(self, queue: str, durable: bool, arguments: dict[str, str] | None = None) -> None:
         assert durable
-        self._broker.queues.add(queue)
+        declared = self._broker.queues.setdefault(queue, arguments or {})
+        if declared != (arguments or {}):
+            self.is_open = False
+            raise ChannelClosedByBroker(
+                406, f"PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-exchange' for queue '{queue}' in vhost '/'"
+            )
 
     def queue_bind(self, queue: str, exchange: str, routing_key: str) -> None:
-        self._broker.bindings.append((queue, exchange, routing_key))
+        self._broker.bindings.add((queue, exchange, routing_key))
 
     def basic_qos(self, prefetch_count: int) -> None:
         self.prefetch = prefetch_count
@@ -121,7 +131,7 @@ class FakeConnection:
         self._tags = 0
 
     def channel(self) -> FakeChannel:
-        channel = FakeChannel(self._broker)
+        channel = FakeChannel(self._broker, self)
         self.channels.append(channel)
         return channel
 
@@ -138,6 +148,11 @@ class FakeConnection:
                 return
         self._broker.deliver(queue_name, body, headers)
         time.sleep(time_limit)
+
+    def sleep(self, duration: float) -> None:
+        """What `BlockingConnection.sleep` does: waits while it keeps the connection alive."""
+        self._broker.slept.append(duration)
+        time.sleep(duration)
 
     def close(self) -> None:
         self.is_open = False

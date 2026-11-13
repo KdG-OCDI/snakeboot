@@ -19,6 +19,7 @@ from snakeboot.testing.application_marker import (
     injected_fields_of,
     injected_parameters_of,
 )
+from snakeboot.testing.component_replacements import nested_test_components
 from snakeboot.testing.injection import Injection, InjectionPoint
 from snakeboot.testing.source_scan import ApplicationNotFoundError, ProjectSources
 
@@ -39,12 +40,13 @@ def application_test_fixture(request: pytest.FixtureRequest) -> Iterator[Mapping
     points = [*fields.values(), *parameters.values()]
     mocks = {p.component_type: create_autospec(p.component_type, instance=True) for p in points if _is(p, "MOCK")}
     sources = _sources_of(request.config)
+    test_components = {**sources.test_components(), **nested_test_components(_classes_of(request), mocks.keys())}
     with TestApplication.start(
         _application_of(marker, sources),
         mocks,
         environment=marker.environment,
         only=marker.only,
-        test_components={replaced: _built(component) for replaced, component in sources.test_components().items()},
+        test_components={replaced: _built(component) for replaced, component in test_components.items()},
     ) as started:
         for point in points:
             if _is(point, "SPY"):
@@ -66,6 +68,11 @@ def _marker_of(request: pytest.FixtureRequest) -> ApplicationTest:
     if marker is None:
         pytest.fail(f"{request.node.name} asks for {APPLICATION_TEST_FIXTURE}, but is no @application_test.")
     return marker
+
+
+def _classes_of(request: pytest.FixtureRequest) -> list[type]:
+    """The class of the test and the classes it is nested in, the outermost first."""
+    return [node.obj for node in request.node.listchain() if isinstance(node, pytest.Class)]
 
 
 def _sources_of(config: pytest.Config) -> ProjectSources:
