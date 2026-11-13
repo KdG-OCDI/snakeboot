@@ -9,6 +9,7 @@ from snakeboot.configuration import (
     InvalidConfigurationPropertiesError,
     ServerProperties,
     begin_configuration,
+    sections_with_a_table,
 )
 from tests.configuration.sample_service.greeting_properties import GreetingProperties
 
@@ -79,3 +80,21 @@ def test_an_optional_table_that_is_only_partly_there_stops_the_start(monkeypatch
 
     with pytest.raises(ValidationError, match=r"database\.host"):
         begin_configuration(ServerProperties, optional=INFRASTRUCTURE_SECTIONS, package=SAMPLE)
+
+
+def test_which_tables_there_are_is_known_without_reading_a_value(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("SERVER__PORT", "eighty")  # invalid, but [server] is in application.toml
+    monkeypatch.setenv("CACHE__REDIS_URL", "redis://cache:6379/0")  # a table of the environment alone
+    monkeypatch.setenv("DATABASE", "postgres")  # no key of a table: names no table
+
+    present = sections_with_a_table(
+        ServerProperties, GreetingProperties, DatabaseProperties, CacheProperties, package=SAMPLE
+    )
+
+    assert present == {ServerProperties, GreetingProperties, CacheProperties}
+
+
+def test_without_a_table_no_section_is_there() -> None:
+    present = sections_with_a_table(ServerProperties, DatabaseProperties, package="tests.configuration.empty_service")
+
+    assert present == frozenset()

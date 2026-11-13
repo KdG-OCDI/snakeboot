@@ -2,14 +2,20 @@
 
 import gc
 from collections.abc import Iterator
+from dataclasses import dataclass
+from typing import Annotated, Protocol
 
 import pytest
-from sqlalchemy import text
+from sqlalchemy import inspect, text
 
 from snakeboot.data import (
     REPOSITORY_ATTRIBUTE,
+    CrudRepository,
     DataIntegrityViolationError,
+    Id,
     OptimisticLockingFailureError,
+    Version,
+    entity,
 )
 from snakeboot.security import Principal, SecurityContext
 from snakeboot.sqlalchemy_data import Database
@@ -141,3 +147,38 @@ def test_in_a_transaction_the_row_as_read_is_held_although_nobody_holds_its_enti
     with pytest.raises(OptimisticLockingFailureError):
         save_after_another_transaction_saved()
     assert workshops.find_by_id("w1") == WorkshopRecord("w1", "Clean Code", version=1)
+
+
+@entity("data_seat")
+@dataclass
+class SeatRecord:
+    """An entity whose version column is NOT NULL, as in a schema another tool made: `int`, starting at 0."""
+
+    id: Annotated[str, Id()]
+    holder: str
+    version: Annotated[int, Version()] = 0
+
+
+class SeatRecords(CrudRepository[SeatRecord, str], Protocol):
+    """The seats."""
+
+
+def test_a_version_that_is_never_empty_starts_at_one_and_still_refuses_a_lost_update() -> None:
+    database = in_memory_database()
+    mapping = EntityMapping.of([SeatRecord])
+    mapping.metadata.create_all(database.engine, tables=mapping.tables)
+    seats: SeatRecords = getattr(SeatRecords, REPOSITORY_ATTRIBUTE)(SqlAlchemyRepositoryOperations(database, mapping))
+
+    assert seats.save(SeatRecord("s1", "ann")).version == 1
+    ann, bob = seats.find_by_id("s1"), seats.find_by_id("s1")
+    assert ann is not None
+    assert bob is not None
+    ann.holder, bob.holder = "ann again", "bob"
+    seats.save(ann)
+
+    with pytest.raises(OptimisticLockingFailureError):
+        seats.save(bob)
+    assert [c["nullable"] for c in inspect(database.engine).get_columns("data_seat") if c["name"] == "version"] == [
+        False
+    ]
+    database.close()

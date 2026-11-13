@@ -3,6 +3,7 @@ from collections.abc import Mapping, Sequence
 from snakeboot.configuration.configuration import Configuration
 from snakeboot.configuration.configuration_sources import ConfigurationSources, sections_by_prefix
 from snakeboot.configuration.section import Section
+from snakeboot.configuration.section_prefix import prefix_of
 
 
 def load_configuration(*sections: type[Section], package: str) -> Configuration:
@@ -17,7 +18,8 @@ def load_configuration(*sections: type[Section], package: str) -> Configuration:
     Nothing else is read: no `.env` file, no default in code, no command line. The files are package
     data, so a source checkout and an installed wheel find them alike. Everything fails here, at
     start-up: InvalidConfigurationPropertiesError for a broken model, ConfigurationFileNotFoundError
-    for a missing file, pydantic's ValidationError for a missing, unknown or invalid value.
+    for a missing file, pydantic's ValidationError for a missing, unknown or invalid value, with a
+    note per problem that names its key and its variable (`configuration_problems`).
 
     This takes both steps at once. An application lets `snakeboot.application` take them: the
     sections of the container are then found in its modules instead of listed.
@@ -45,3 +47,14 @@ def begin_configuration(
         required=sections_by_prefix(sections),
         optional=sections_by_prefix(optional),
     )
+
+
+def sections_with_a_table(*sections: type[Section], package: str) -> frozenset[type[Section]]:
+    """Returns the sections among `sections` whose table the files or the environment have, reading no value.
+
+    Which tables there are decides which commands an application has, `migrate` comes with `[database]`, so the help
+    of a program lists them even when a value is missing or invalid. The files are the ones `begin_configuration`
+    reads, with the active profile's; a missing file stops here too.
+    """
+    tables = ConfigurationSources.of(package).tables()
+    return frozenset(section for section in sections if prefix_of(section) in tables)

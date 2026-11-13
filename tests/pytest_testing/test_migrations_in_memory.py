@@ -64,7 +64,7 @@ def test_migrations_that_lack_a_column_of_an_entity_stop_every_test_on_them() ->
 
 
 @application_module_test("tests.pytest_testing.depot.deliveries", application=DepotApplication)
-def test_a_slice_runs_every_migration_of_the_application(deliveries: Autowired[DeliveryRecords]) -> None:
+def test_a_module_slice_runs_every_migration_of_the_application(deliveries: Autowired[DeliveryRecords]) -> None:
     # snakeboot's own tables come with the shelves' migrations, which this slice leaves out; migrate runs them all.
     deliveries.save(DeliveryRecord(uuid4(), "ann"))
 

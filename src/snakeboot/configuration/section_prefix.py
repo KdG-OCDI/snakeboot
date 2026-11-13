@@ -8,6 +8,9 @@ from snakeboot.configuration.section import Section
 PREFIX_ATTRIBUTE: Final = "__configuration_properties_prefix__"
 PREFIX: Final = re.compile(r"[a-z][a-z0-9]*(?:_[a-z0-9]+)*")
 
+NESTED_DELIMITER: Final = "__"
+"""What separates the levels of an environment variable: `DATABASE__PASSWORD` sets `password` of `[database]`."""
+
 
 def prefix_of(model: type[Section]) -> str:
     """Returns the prefix `model` was declared with. A subclass does not inherit it: it is another section."""

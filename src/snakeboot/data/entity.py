@@ -57,7 +57,8 @@ class Version:
 
     Every update raises it by one, on the condition that the row still holds the number the entity was read with; when
     another transaction changed the row meanwhile, the save raises `OptimisticLockingFailureError` (answer it with 409).
-    A new entity gets 1. Declare it `Annotated[int | None, Version()] = None`.
+    A new entity gets 1. Declare it `Annotated[int | None, Version()] = None`, a column that may be empty; for a
+    `NOT NULL` column, as in a schema another tool made, `Annotated[int, Version()] = 0`.
     """
 
 

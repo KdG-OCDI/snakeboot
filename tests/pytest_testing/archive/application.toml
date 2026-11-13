@@ -1,0 +1,16 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+workers = 1
+debug = false
+allowed_hosts = ["*"]
+log_level = "WARNING"
+
+# A PostgreSQL that nobody runs. Its V1 is pg_dump's, in PostgreSQL's own SQL, which SQLite refuses: a web test runs
+# no migrations, a test of a context runs them all, so on a PostgreSQL in a container.
+[database]
+host = "localhost"
+port = 55432
+name = "archive"
+user = "archive"
+password = "archive"

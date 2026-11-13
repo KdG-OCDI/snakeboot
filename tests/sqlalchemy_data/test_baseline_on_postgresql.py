@@ -129,3 +129,17 @@ def test_a_script_as_pg_dump_writes_it_leaves_no_setting_behind(database: Databa
 
     assert [m.label for m in result.applied] == ["1", "2"]
     assert fits_the_entities(database, schema)
+
+
+def test_a_percent_sign_in_a_script_is_a_percent_sign(database: Database, tmp_path: Path) -> None:
+    # Not the start of a placeholder: in a comment, in a LIKE, in a default.
+    (tmp_path / "V1__codes.sql").write_text(
+        "-- 100% of the codes start with C\n"
+        "CREATE TABLE code (value VARCHAR(10) NOT NULL CHECK (value LIKE 'C%'), note TEXT DEFAULT '50%');\n",
+        encoding="utf-8",
+    )
+    schema = SchemaMigrations(database, migrations_in([tmp_path]), baseline_version=None)
+
+    assert [m.label for m in schema.migrate().applied] == ["1"]
+    with pytest.raises(DataIntegrityViolationError), database.session() as session:
+        session.execute(text("INSERT INTO code (value) VALUES ('D1')"))

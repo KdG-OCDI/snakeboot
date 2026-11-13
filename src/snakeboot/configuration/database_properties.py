@@ -50,9 +50,13 @@ class DatabaseProperties(Section):
     @model_validator(mode="before")
     @classmethod
     def _a_server_or_a_file(cls, table: Any) -> Any:
-        if not isinstance(table, dict) or "file" not in table:
-            return {**table, "file": None} if isinstance(table, dict) else table
-        if server_keys := [key for key in SERVER_KEYS if key in table]:
+        if not isinstance(table, dict):
+            return table
+        # A key given as None is no key: code that builds the section itself passes every field, as for any section.
+        given = {key for key, value in table.items() if value is not None}
+        if "file" not in given:
+            return {**table, "file": None}
+        if server_keys := [key for key in SERVER_KEYS if key in given]:
             raise ValueError(f"[database] is a server or a file, not both: leave out {', '.join(server_keys)}.")
         return {**dict.fromkeys(SERVER_KEYS), **table}
 

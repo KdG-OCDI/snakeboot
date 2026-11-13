@@ -1,0 +1,4 @@
+# A section named like a variable that coding agents set on the host: AI_AGENT=claude-code_...
+[ai_agent]
+model = "claude"
+temperature = 0.2

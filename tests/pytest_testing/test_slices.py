@@ -1,15 +1,19 @@
 """A slice starts part of an application: `@web_test` its REST layer, `@application_module_test` some of its contexts.
 
-The library has two contexts, one module per role: what a slice leaves out, a test gives as a `MockComponent`.
+The library has two contexts, one module per role: what a slice leaves out, a test gives as a `MockComponent`. The
+archive moved in with pg_dump's V1, which SQLite refuses: a web slice runs no migrations, a module slice all of them.
 """
 
 from unittest.mock import create_autospec
 
 import pytest
+from sqlalchemy import inspect
 
 from snakeboot.application import ApplicationContext
 from snakeboot.boot.testing import RestClient, TestApplication
 from snakeboot.rest import BearerAuthentication
+from snakeboot.sqlalchemy_data import Database
+from snakeboot.sqlalchemy_data.schema_migrations import InvalidMigrationError
 from snakeboot.testing import (
     Autowired,
     MockComponent,
@@ -21,6 +25,10 @@ from snakeboot.testing import (
     web_test,
     when,
 )
+from tests.pytest_testing.archive.archive_application import ArchiveApplication
+from tests.pytest_testing.archive.clerks import ClerkRecord, ClerkRecords
+from tests.pytest_testing.archive.documents.file_document import DocumentDTO, FileDocument
+from tests.pytest_testing.archive.documents.read_document import DocumentNotFoundError, ReadDocument
 from tests.pytest_testing.library.catalogue.catalogue import Catalogue
 from tests.pytest_testing.library.library_application import LibraryApplication
 from tests.pytest_testing.library.loans.lend_book import LendBook, LoanDTO, TooManyLoansError
@@ -137,3 +145,64 @@ def test_a_context_that_needs_another_one_names_what_to_mock() -> None:
 def test_a_module_test_names_its_packages() -> None:
     with pytest.raises(TypeError, match="names the packages"):
         application_module_test()
+
+
+CARL = ClerkRecord("key-of-carl", "carl")
+
+AS_CARL = {"Authorization": f"Bearer {CARL.api_key}"}
+
+MINUTES = DocumentDTO(document_id=7, title="Minutes", clerk="carl")
+
+
+@web_test(application=ArchiveApplication)
+class TestTheRestLayerOfAnApplicationWhoseMigrationsSQLiteRefuses:
+    """Like `@WebMvcTest`, which configures no datasource, a web slice runs no migrations: pg_dump's V1 does not stop
+    it."""
+
+    client: Autowired[RestClient]
+    database: Autowired[Database]
+    read_document: MockComponent[ReadDocument]
+    file_document: MockComponent[FileDocument]
+    clerks: MockComponent[ClerkRecords]
+
+    def test_its_controller_answers(self) -> None:
+        when(self.clerks.find_by_id).then_return(CARL)
+        when(self.read_document.execute).then_return(MINUTES)
+
+        response = self.client.get("/api/documents/7", headers=AS_CARL)
+
+        assert (response.status_code, response.json()) == (200, MINUTES.model_dump())
+
+    def test_its_advice_answers(self) -> None:
+        when(self.clerks.find_by_id).then_return(CARL)
+        when(self.read_document.execute).then_raise(DocumentNotFoundError("The archive holds no document 8."))
+
+        response = self.client.get("/api/documents/8", headers=AS_CARL)
+
+        assert (response.status_code, response.json()["code"]) == (404, "document_not_found")
+
+    def test_its_authentication_asks_the_mock_of_the_repository_it_needs(self) -> None:
+        when(self.clerks.find_by_id).then_return(None)
+
+        response = self.client.post("/api/documents", json={"title": "Minutes"}, headers={"Authorization": "Bearer ?"})
+
+        assert response.status_code == 401
+        verify(self.clerks.find_by_id).called_once_with("?")
+        verify(self.file_document.execute).never_called()
+
+    def test_its_database_is_one_in_memory_not_the_one_of_application_toml(self) -> None:
+        health = self.client.get("/health").json()
+
+        assert health["components"]["database"] == {"status": "UP"}
+
+    def test_its_database_has_only_the_tables_of_snakeboots_own_entities(self) -> None:
+        tables = inspect(self.database.engine).get_table_names()
+
+        assert tables == ["snakeboot_event_publication", "snakeboot_scheduler_lock"]
+
+
+def test_a_module_slice_of_that_application_runs_its_migrations_and_names_the_one_sqlite_refuses() -> None:
+    documents = ModuleSlice(("tests.pytest_testing.archive.documents",))
+
+    with pytest.raises(InvalidMigrationError, match=r"V1__schema_before_snakeboot\.sql does not run on SQLite"):
+        TestApplication.start(ArchiveApplication, only=documents)

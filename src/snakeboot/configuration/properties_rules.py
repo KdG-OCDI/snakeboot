@@ -29,17 +29,18 @@ def _models_in(section: type[BaseModel]) -> list[type[BaseModel]]:
         if model not in found:
             found[model] = None
             for field in model.model_fields.values():
-                waiting.extend(_models_named_by(field.annotation))
+                waiting.extend(models_named_by(field.annotation))
     return list(found)
 
 
-def _models_named_by(annotation: object) -> Iterator[type[BaseModel]]:
+def models_named_by(annotation: object) -> Iterator[type[BaseModel]]:
+    """Yields the models that the annotation of a field names, itself or in its arguments, in order."""
     # `tuple[Llm, ...]`, `Llm | None` and `Annotated[Llm | Extractive, ...]` all name models in their arguments.
     if get_origin(annotation) is None and isinstance(annotation, type) and issubclass(annotation, BaseModel):
         yield annotation
         return
     for argument in get_args(annotation):
-        yield from _models_named_by(argument)
+        yield from models_named_by(argument)
 
 
 def _refuse_model_outside_section(model: type[BaseModel]) -> None:

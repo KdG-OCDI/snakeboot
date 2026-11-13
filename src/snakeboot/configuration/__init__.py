@@ -5,7 +5,9 @@
         model: str                               # no default: the value is in application.toml
 
 The values come from `application.toml` in the package, then `application-<profile>.toml` when
-SNAKEBOOT_PROFILE is set, then environment variables such as CHATBOT__MODEL; nothing else.
+SNAKEBOOT_PROFILE is set, then environment variables such as CHATBOT__MODEL; nothing else. A missing, unknown or
+invalid value stops the start with pydantic's ValidationError, and `configuration_problems` says what is wrong in
+one sentence per problem, naming the key and the variable that sets it, as the commands of an application print it.
 
 A section is a component of the module that declares it, so it enters the container with that module. When the
 application starts (`snakeboot.boot`), snakeboot reads every section, its own included; outside an application,
@@ -23,12 +25,13 @@ from snakeboot.configuration.configuration_errors import (
     ConfigurationFileNotFoundError,
     InvalidConfigurationPropertiesError,
 )
+from snakeboot.configuration.configuration_problems import configuration_problems
 from snakeboot.configuration.configuration_properties import configuration_properties
 from snakeboot.configuration.configuration_sources import BASE_FILE, PROFILE_VARIABLE
 from snakeboot.configuration.cors_properties import CorsProperties
 from snakeboot.configuration.database_properties import DatabaseProperties
 from snakeboot.configuration.events_properties import EventsProperties
-from snakeboot.configuration.load_configuration import begin_configuration, load_configuration
+from snakeboot.configuration.load_configuration import begin_configuration, load_configuration, sections_with_a_table
 from snakeboot.configuration.logging_properties import LoggingProperties
 from snakeboot.configuration.oauth2_properties import OAuth2Properties
 from snakeboot.configuration.rabbitmq_properties import (
@@ -61,7 +64,9 @@ __all__ = [
     "Section",
     "ServerProperties",
     "begin_configuration",
+    "configuration_problems",
     "configuration_properties",
     "load_configuration",
     "sections_declared_in",
+    "sections_with_a_table",
 ]

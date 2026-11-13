@@ -253,7 +253,13 @@ def _execute_script(connection: Connection, sql: str) -> None:
         for statement in statements_of(sql):
             connection.exec_driver_sql(statement)
     else:
-        connection.exec_driver_sql(sql)
+        # Straight to the driver, without parameters: exec_driver_sql hands psycopg an empty list of them, and psycopg
+        # then reads every `%` of the script (in LIKE 'C%', or in a comment) as the start of a placeholder.
+        cursor = connection.connection.cursor()
+        try:
+            cursor.execute(sql)
+        finally:
+            cursor.close()
         # A script from pg_dump begins by emptying search_path for the rest of the session: back to the defaults, so
         # the history row lands where the history was read, and no setting of one script leaks into the next.
         connection.exec_driver_sql("RESET ALL")

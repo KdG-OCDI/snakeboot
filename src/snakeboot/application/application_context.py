@@ -1,5 +1,5 @@
 import inspect
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Collection, Mapping, Sequence
 from dataclasses import replace
 from importlib import import_module
 from types import FunctionType, ModuleType
@@ -53,14 +53,31 @@ type ConditionalModules = Mapping[type[Section], tuple[str, ...]]
 """Which modules join the container when the configuration has which table, like `@ConditionalOnProperty`."""
 
 
+def component_scan_of(
+    application: type, conditional: ConditionalModules, present: Collection[type[Section]]
+) -> ComponentScan:
+    """Returns the component scan of `application`: its modules, snakeboot's own, and those of the tables `present`.
+
+    `ApplicationContext.of` passes the sections it read. The help of the program passes the sections whose table the
+    configuration has, without reading a value, so it lists the same commands when a value is missing or invalid.
+    """
+    conditional_modules = tuple(
+        module for section, modules in conditional.items() if section in present for module in modules
+    )
+    scan = ComponentScan.of(application)
+    return replace(
+        scan, auto_configuration=(*scan.auto_configuration, *APPLICATION_AUTO_CONFIGURATION, *conditional_modules)
+    )
+
+
 class ApplicationContext(ApplicationComponents):
     """The running application, like Spring's `ApplicationContext`: its configuration, its container, its components.
 
-    `of` reads the configuration and finds the modules of the application without building anything, so a command's
-    `--help` answers at once; `refresh` imports the modules, reads every section they declare and builds wireup's
-    container, like Spring's `refresh()`; `start` does both. With a `[database]` table, `refresh` installs the
-    transaction manager of `@transactional` that the container provides; then it builds every event listener and
-    registers it with the publisher, so a listener may depend on a use case that publishes events.
+    `of` reads the configuration and finds the modules of the application without building anything; `refresh`
+    imports the modules, reads every section they declare and builds wireup's container, like Spring's `refresh()`;
+    `start` does both. With a `[database]` table, `refresh` installs the transaction manager of `@transactional` that
+    the container provides; then it builds every event listener and registers it with the publisher, so a listener
+    may depend on a use case that publishes events.
 
     The context knows no framework: the binding that starts the application (`snakeboot.boot`) says which module
     joins the container for which table (`conditional`), and publishes the components it builds.
@@ -93,15 +110,7 @@ class ApplicationContext(ApplicationComponents):
             configuration.get(LoggingProperties) if LoggingProperties in configuration.sections else None
         )
         configure_logging(configuration.get(ServerProperties), logging_properties, service=package.rpartition(".")[2])
-        present = tuple(
-            module
-            for section, modules in conditional.items()
-            if section in configuration.sections
-            for module in modules
-        )
-        scan = ComponentScan.of(application)
-        scan = replace(scan, auto_configuration=(*scan.auto_configuration, *APPLICATION_AUTO_CONFIGURATION, *present))
-        return cls(application, scan, configuration)
+        return cls(application, component_scan_of(application, conditional, configuration.sections), configuration)
 
     @classmethod
     def start(cls, application: type, conditional: ConditionalModules) -> Self:

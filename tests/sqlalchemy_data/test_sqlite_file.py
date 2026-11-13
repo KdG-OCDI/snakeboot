@@ -36,6 +36,17 @@ def test_a_table_with_a_server_and_a_file_stops_the_start() -> None:
         DatabaseProperties.model_validate({"file": "x.sqlite3", "host": "db"})
 
 
+def test_a_key_given_as_none_is_no_key_of_the_other_kind() -> None:
+    server = DatabaseProperties(
+        host="db", port=5432, name="shop", user="shop", password=None, file=None, baseline_version=None
+    )
+    in_a_file = DatabaseProperties(
+        host=None, port=None, name=None, user=None, password=None, file="shop.sqlite3", baseline_version=None
+    )
+
+    assert (server.host, server.file, in_a_file.file, in_a_file.host) == ("db", None, "shop.sqlite3", None)
+
+
 def test_what_one_transaction_saved_the_next_reads_from_the_file(tmp_path: Path) -> None:
     database = file_database(tmp_path)
     with database.transaction() as session:

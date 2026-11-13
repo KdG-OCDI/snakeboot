@@ -32,7 +32,7 @@ from snakeboot.security import Principal
 from snakeboot.testing.environment import TestEnvironment
 from snakeboot.testing.published_events import PublishedEvents
 from snakeboot.testing.signed_in_tokens import signed_in_principal
-from snakeboot.testing.slices import ApplicationSlice, ModuleSlice
+from snakeboot.testing.slices import ApplicationSlice, ModuleSlice, WebSlice
 
 if TYPE_CHECKING:
     from httpx2 import Response
@@ -75,9 +75,9 @@ class TestApplication:
     The application starts as it does for real, from its application.toml and the active profile, with these
     differences: `overrides` replace components with doubles, or wrap them in a spy (`SPY`); with `[database]` the
     database is a fresh SQLite in memory that the application's migrations built and that was checked against the
-    entities, as Spring Boot's tests run Flyway on H2 with `ddl-auto=validate` (without migrations, the tables of the
-    entities), or a copy of a PostgreSQL that the migrations built (`TestEnvironment.database`); with `[cache]` the
-    cache is an `InMemoryCache`;
+    entities, as Spring Boot's tests run Flyway on H2 with `ddl-auto=validate` (without migrations, or in a `WebSlice`,
+    which runs none, the tables of the entities), or a copy of a PostgreSQL that the migrations built
+    (`TestEnvironment.database`); with `[cache]` the cache is an `InMemoryCache`;
     with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own `@rabbit_listener` methods,
     without a broker (`InProcessRabbitTemplate`); the `@application_module_listener` methods run on the caller's
     thread, so what they did is there when the call that published returns; every event is kept in
@@ -119,7 +119,8 @@ class TestApplication:
         application without one of them, it does nothing. A type that `overrides` maps to `SPY` gets a spy around its
         component, the test component included, before the listeners are built. `only` starts part of the
         application, a `WebSlice` or a `ModuleSlice`: then `overrides` join the container, standing in for what the
-        slice leaves out, and a dependency nobody gave stops the start with its name.
+        slice leaves out, and a dependency nobody gave stops the start with its name. A `ModuleSlice` runs every
+        migration of the application; a `WebSlice` runs none, on SQLite in memory whatever `environment.database` says.
         """
         environment = environment or TestEnvironment()
         context = ApplicationContext.of(
@@ -131,7 +132,7 @@ class TestApplication:
         overrides = overrides or {}
         explicit = {component_type: double for component_type, double in overrides.items() if double is not SPY}
         spied = tuple(component_type for component_type, double in overrides.items() if double is SPY)
-        services = _test_services(context, environment, explicit, application=application)
+        services = _test_services(context, environment, explicit, migrated=_migrated(application, only))
         doubles = _Doubles(services, explicit, joining=only is not None, spied=spied)
         try:
             return cls._started(context, doubles=doubles, test_components=test_components)
@@ -385,13 +386,13 @@ def _test_services(
     environment: TestEnvironment,
     overrides: Mapping[Any, object],
     *,
-    application: type,
+    migrated: type | None,
 ) -> dict[Any, object]:
     """The executor, the database, the cache and the broker of a test, in place of the application's own."""
     sections = context.configuration.sections
     services: dict[Any, object] = {TaskExecutor: SyncTaskExecutor()}
     if DatabaseProperties in sections:
-        services |= _test_database(context, environment, overrides, application=application)
+        services |= _test_database(context, environment, overrides, migrated=migrated)
     if CacheProperties in sections and Cache not in overrides:
         services[Cache] = InMemoryCache()
     if RabbitProperties in sections:
@@ -399,15 +400,26 @@ def _test_services(
     return services
 
 
+def _migrated(application: type, only: ApplicationSlice | None) -> type | None:
+    """The application whose migrations build the database of a test: the whole `application`, as `migrate` runs
+    them, also for a `ModuleSlice`; none for a `WebSlice`, which, like `@WebMvcTest`, sets up no database of its own."""
+    return None if isinstance(only, WebSlice) else application
+
+
 def _test_database(
     context: ApplicationContext,
     environment: TestEnvironment,
     overrides: Mapping[Any, object],
     *,
-    application: type,
+    migrated: type | None,
 ) -> dict[Any, object]:
-    """The database of a test, on the schema the migrations of the whole `application` build, as `migrate` runs them,
-    also when `context` starts a slice of it; the entities of `context` are what the schema is checked against."""
+    """The database of a test, on the schema the migrations of the whole `migrated` application build, also when
+    `context` starts a slice of it; the entities of `context` are what the schema is checked against.
+
+    Without `migrated`, no migration runs, whatever the environment: the database is SQLite in memory with the tables
+    of the entities of `context`, made from the entities as for an application without migrations. In a `WebSlice`
+    those are snakeboot's own, of the event publication registry and the scheduler locks, which stay in every slice.
+    """
     from snakeboot.data import ENTITY_ATTRIBUTE  # noqa: PLC0415  # reason: only an application with a database
     from snakeboot.sqlalchemy_data import Database  # noqa: PLC0415  # reason: as above
     from snakeboot.sqlalchemy_data.schema_migrations import migration_locations, migrations_in  # noqa: PLC0415  # reason: as above
@@ -416,8 +428,10 @@ def _test_database(
     if Database in overrides:
         return {}
     entity_types = context.classes_marked(ENTITY_ATTRIBUTE)
-    sliced = context.application is not application
-    every_entity = ComponentScan.of(application).classes_marked(ENTITY_ATTRIBUTE) if sliced else entity_types
+    if migrated is None:
+        return {Database: in_memory_database(entity_types, migrations=())}
+    sliced = context.application is not migrated
+    every_entity = ComponentScan.of(migrated).classes_marked(ENTITY_ATTRIBUTE) if sliced else entity_types
     migrations = migrations_in(migration_locations(every_entity))
     if environment.database is None:
         return {Database: in_memory_database(entity_types, migrations=migrations)}

@@ -1,4 +1,4 @@
-"""A depot of two bounded contexts, each with its own migrations: a slice of one runs the migrations of both."""
+"""A depot of two bounded contexts, each with its own migrations: a module slice of one runs those of both."""
 
 from snakeboot.component_scan import application_root
 

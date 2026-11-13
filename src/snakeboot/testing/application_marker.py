@@ -113,8 +113,10 @@ def web_test(
                 ...
 
     Every other module of the application is left out (`WebSlice`), so a controller's use cases and ports are given
-    as a `MockComponent`; one that is missing stops the test and names it. The calls carry `signed_in_as`, and the
-    controllers' own `@roles_allowed` and advices answer, as in the whole application.
+    as a `MockComponent`, as is a repository that an advice or the authentication needs; one that is missing stops the
+    test and names it. The calls carry `signed_in_as`, and the controllers' own `@roles_allowed` and advices answer,
+    as in the whole application. Like `@WebMvcTest`, which configures no datasource, it runs no migrations: a
+    migration in PostgreSQL's own SQL, which SQLite refuses, does not stop it.
     """
     properties = MappingProxyType(dict(properties or {}))
     marker = ApplicationTest(application, TestEnvironment(profile, properties), only=WebSlice())
@@ -137,7 +139,8 @@ def application_module_test(
 
     Only the modules of `packages`, of the application's package itself and those that declare a section join the
     application (`ModuleSlice`): the other contexts are left out, so whatever these use of them is given as a
-    `MockComponent`, and a dependency nobody gave stops the test and names it.
+    `MockComponent`, and a dependency nobody gave stops the test and names it. Every migration of the application
+    runs, as `migrate` runs them; `database=PostgreSQLContainer()` runs them on PostgreSQL instead of SQLite in memory.
     """
     if not packages:
         raise TypeError("@application_module_test names the packages of the contexts it starts.")

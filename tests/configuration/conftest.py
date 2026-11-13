@@ -4,7 +4,7 @@ import pytest
 
 from snakeboot.configuration import PROFILE_VARIABLE
 
-SECTIONS_OF_THE_SAMPLE = ("SERVER__", "DATABASE__", "CACHE__", "GREETING__", "FAREWELL__")
+SECTIONS_OF_THE_SAMPLE = ("SERVER__", "DATABASE__", "CACHE__", "GREETING__", "FAREWELL__", "AI_AGENT__")
 
 
 @pytest.fixture(autouse=True)

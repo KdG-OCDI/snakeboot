@@ -1,21 +1,30 @@
 import os
 import re
+import tomllib
 from collections.abc import Iterable, Mapping
 from dataclasses import dataclass, field
 from importlib.resources import files
 from importlib.resources.abc import Traversable
 from typing import Any, Final, Literal, override
 
-from pydantic import create_model
-from pydantic_settings import BaseSettings, PydanticBaseSettingsSource, SettingsConfigDict, TomlConfigSettingsSource
+from pydantic import ValidationError, create_model
+from pydantic.fields import FieldInfo
+from pydantic_settings import (
+    BaseSettings,
+    EnvSettingsSource,
+    PydanticBaseSettingsSource,
+    SettingsConfigDict,
+    TomlConfigSettingsSource,
+)
 
 from snakeboot.configuration.configuration_errors import (
     ConfigurationFileNotFoundError,
     InvalidConfigurationPropertiesError,
 )
+from snakeboot.configuration.configuration_problems import describe_problems
 from snakeboot.configuration.properties_rules import refuse_loose_models
 from snakeboot.configuration.section import Section
-from snakeboot.configuration.section_prefix import prefix_of
+from snakeboot.configuration.section_prefix import NESTED_DELIMITER, prefix_of
 
 PROFILE_VARIABLE: Final = "SNAKEBOOT_PROFILE"
 """The environment variable that activates a profile, like `SPRING_PROFILES_ACTIVE` (one profile at most)."""
@@ -65,11 +74,30 @@ class ConfigurationSources:
     ) -> dict[type[Section], Section]:
         """Reads every required section, and every optional one whose table the files or the environment have.
 
-        `unknown_tables="forbid"` refuses a table that no section claims; `"ignore"` leaves it for a later read.
+        `unknown_tables="forbid"` refuses a table that no section claims; `"ignore"` leaves it for a later read. A
+        missing, unknown or invalid value raises pydantic's ValidationError, with a note per problem that names its
+        key and its variable (`configuration_problems`).
         """
-        loaded = _root_model(required, optional, self.files, unknown_tables=unknown_tables)(**self.properties)
+        root = _root_model(required, optional, self.files, unknown_tables=unknown_tables)
+        try:
+            loaded = root(**self.properties)
+        except ValidationError as error:
+            describe_problems(error, root, [file.name for file in self.files])
+            raise
         read = {section: getattr(loaded, prefix) for prefix, section in {**required, **optional}.items()}
         return {section: value for section, value in read.items() if value is not None}
+
+    def tables(self) -> frozenset[str]:
+        """Names the tables that the files, the environment and the properties have, without reading a value.
+
+        A variable names the table of its first level, `DATABASE__PASSWORD` the table `database`, as `read` takes
+        it; a variable without a level, `DATABASE`, names none.
+        """
+        in_files = {name for file in self.files for name in tomllib.loads(file.read_text(encoding="utf-8"))}
+        in_environment = {
+            variable.partition(NESTED_DELIMITER)[0].lower() for variable in os.environ if NESTED_DELIMITER in variable
+        }
+        return frozenset(in_files | in_environment | set(self.properties))
 
 
 def sections_by_prefix(sections: Iterable[type[Section]]) -> dict[str, type[Section]]:
@@ -132,6 +160,22 @@ def _configuration_files(package: str, profile: str | None) -> tuple[Traversable
     return base, profile_file
 
 
+class KeysOfTablesSource(EnvSettingsSource):
+    """The environment variables that set a key of a table, `SECTION__KEY` or `SECTION__TABLE__KEY`, and no other.
+
+    pydantic-settings would also read a variable named like the section itself, `AI_AGENT`, as the whole table in
+    JSON; a host sets such variables for its own purposes (`AI_AGENT=claude-code`, `SERVER`, `DATABASE`), so the
+    start would stop on a value the application never meant. Like Spring Boot's binder, which ignores a plain value
+    at a name that has nested properties, the bare variable of a section is left out; every `SECTION__KEY` stays.
+    """
+
+    @override
+    def get_field_value(self, field: FieldInfo, field_name: str) -> tuple[Any, str, bool]:
+        # Every field of the root model is a section, a table: only the variables of its keys can set it.
+        _, field_key, value_is_complex = super().get_field_value(field, field_name)
+        return None, field_key, value_is_complex
+
+
 def _root_model(
     required: Mapping[str, type[Section]],
     optional: Mapping[str, type[Section]],
@@ -140,7 +184,9 @@ def _root_model(
     unknown_tables: UnknownTables,
 ) -> type[BaseSettings]:
     class RootSettings(BaseSettings):
-        model_config = SettingsConfigDict(env_prefix="", env_nested_delimiter="__", extra=unknown_tables, frozen=True)
+        model_config = SettingsConfigDict(
+            env_prefix="", env_nested_delimiter=NESTED_DELIMITER, extra=unknown_tables, frozen=True
+        )
 
         @classmethod
         @override
@@ -156,7 +202,7 @@ def _root_model(
             # source wins, key by key.
             return (
                 init_settings,
-                env_settings,
+                KeysOfTablesSource(settings_cls),
                 TomlConfigSettingsSource(settings_cls, toml_file=list(toml_files), deep_merge=True),
             )
 
