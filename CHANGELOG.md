@@ -3,6 +3,12 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
 
+## Unreleased
+
+- Connecting to the PostgreSQL server of `[database]` gives up after 10 seconds, like the `connectTimeout` of
+  PostgreSQL's JDBC driver. Before, psycopg waited 130 seconds per address, and on Windows even a refused connection
+  failed only then: `migrate` or the start seemed to hang for over four minutes when the server was not running.
+
 ## 0.12.0
 
 Tests in Spring Boot's style, without conftest.py, fixtures or settings:

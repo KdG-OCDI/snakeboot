@@ -3,6 +3,7 @@ from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from contextvars import ContextVar
 from dataclasses import dataclass, field
+from typing import Final
 
 from sqlalchemy import URL, Engine, create_engine
 from sqlalchemy.orm import Session, sessionmaker
@@ -13,6 +14,12 @@ from snakeboot.sqlalchemy_data.persistence_context import hold_what_is_loaded
 from snakeboot.sqlalchemy_data.sqlite import sqlite_file_engine
 
 logger = logging.getLogger(__name__)
+
+CONNECT_TIMEOUT_SECONDS: Final = 10
+"""How long connecting to the PostgreSQL server may take, like the `connectTimeout` of PostgreSQL's JDBC driver.
+
+Without it psycopg waits 130 seconds per address of the host, and on Windows even a refused connection fails only
+then: over four minutes for `localhost` before `migrate` or the start says the server is not running."""
 
 
 @dataclass
@@ -46,7 +53,7 @@ class Database:
     @classmethod
     def of(cls, properties: DatabaseProperties) -> "Database":
         """Returns the database of `[database]`: its SQLite file, or its PostgreSQL server, whose pool tests a
-        connection before it lends it."""
+        connection before it lends it and gives up connecting after `CONNECT_TIMEOUT_SECONDS`."""
         if properties.file is not None:
             return cls(sqlite_file_engine(properties.file))
         url = URL.create(
@@ -57,7 +64,7 @@ class Database:
             port=properties.port,
             database=properties.name,
         )
-        return cls(create_engine(url, pool_pre_ping=True))
+        return cls(create_engine(url, pool_pre_ping=True, connect_args={"connect_timeout": CONNECT_TIMEOUT_SECONDS}))
 
     @property
     def in_transaction(self) -> bool:
