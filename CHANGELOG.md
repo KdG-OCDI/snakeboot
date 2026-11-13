@@ -1,9 +1,11 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
+a minor release may break the API: pin `snakeboot>=0.13,<0.14`.
 
-## Unreleased
+## 0.13.0
+
+What an application needs to move to snakeboot with its production data, and tests that run the real migrations:
 
 - Connecting to the PostgreSQL server of `[database]` gives up after 10 seconds, like the `connectTimeout` of
   PostgreSQL's JDBC driver. Before, psycopg waited 130 seconds per address, and on Windows even a refused connection
@@ -79,8 +81,8 @@ a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
 - The start stops on an `UploadedFile` that is not one plain parameter (a list, an optional file, a default), on an
   upload on a GET or DELETE, and on `produces` on an endpoint that answers with something else than a `FileDownload`.
 - An entity describes the unique constraints and indexes of an existing schema with their own names (#7), so
-  `make_migration` and the schema checks of the tests no longer propose to drop them: `@entity(..., unique_constraints=(UniqueConstraint(name,
-  *columns),))`, like JPA's `@UniqueConstraint`, and `Index(name, *columns, unique=True, where="...")`, a unique
+  `make_migration` and the schema checks of the tests no longer propose to drop them:
+  `@entity(..., unique_constraints=(UniqueConstraint(name, *columns),))`, like JPA's `@UniqueConstraint`, and `Index(name, *columns, unique=True, where="...")`, a unique
   index, partial with `where` (whose condition the schema checks leave alone). On PostgreSQL a unique constraint
   (Django's `UniqueConstraint`) and a unique index (one with a `condition`) are different objects: each compares
   equal to the one the entity declares, and not to the other.
@@ -111,6 +113,19 @@ a minor release may break the API: pin `snakeboot>=0.12,<0.13`.
   spy records what a listener calls too: `overrides={PaymentPort: SPY}`. A `SpyComponent` of an `@application_test`
   passes it. `TestApplication.spy(T)` after the start still spies on what is built later, but not for the listeners,
   which were built when the application started.
+
+Moving an application from 0.12:
+
+| 0.12 | 0.13 |
+|---|---|
+| a test on SQLite in memory got the tables of the entities | it runs the application's migrations and checks the entities against them: let `make_migration` write what the migrations lack, or test with `PostgreSQLContainer()` when they need PostgreSQL's own SQL |
+| a slice ran the migrations of its own contexts | it runs every migration of the application |
+| a `@test_component` inside a plain class held for every test | it holds for that class only: move it to the module's top level |
+| a listener was built when the publisher was first needed | every listener is built when the application starts, for a command such as `migrate` too |
+| a wireup container built without `ApplicationContext` gave the publisher its listeners | it calls `get(EventListenerMethodProcessor).register_listeners()` |
+| `SchemaMigrations.migrate()` returned the migrations it ran | it returns `MigrateResult(baselined, applied)` |
+| code that builds `ServerProperties`, `RabbitListenerProperties`, `RabbitListenerMapping` or `EntityDescription` itself | it also passes `max_upload_size`, `retry`, `dead_letter_queue` or `unique_constraints` |
+| a refused declaration made a listener retry as if RabbitMQ were down | it stops the start with `AmqpDeclarationError` |
 
 ## 0.12.0
 
