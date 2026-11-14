@@ -1,6 +1,6 @@
 [project]
 name = "snakeboot"
-version = "0.13.2"
+version = "0.14.0"
 description = "Spring Boot ergonomics for hexagonal Python: @transactional, application events, a component scan, typed configuration with profiles, singleton REST controllers on FastAPI and Spring Data repositories on SQLAlchemy, wired by wireup."
 readme = "README.md"
 license = "MIT"
@@ -102,7 +102,7 @@ include_external_packages = true
 [[tool.importlinter.contracts]]
 name = "what an application imports knows no web, persistence or cache framework"
 type = "forbidden"
-source_modules = ["snakeboot.transaction", "snakeboot.component_scan", "snakeboot.openapi", "snakeboot.testing", "snakeboot.cache", "snakeboot.security", "snakeboot.tracing", "snakeboot.actuator", "snakeboot.events", "snakeboot.configuration", "snakeboot.rest", "snakeboot.data", "snakeboot.command_line", "snakeboot.lifecycle", "snakeboot.scheduling", "snakeboot.oauth2", "snakeboot.rabbitmq", "snakeboot.event_publication", "snakeboot.scheduler_lock", "snakeboot.application"]
+source_modules = ["snakeboot.transaction", "snakeboot.component_scan", "snakeboot.openapi", "snakeboot.testing", "snakeboot.cache", "snakeboot.security", "snakeboot.tracing", "snakeboot.actuator", "snakeboot.events", "snakeboot.configuration", "snakeboot.rest", "snakeboot.data", "snakeboot.command_line", "snakeboot.lifecycle", "snakeboot.scheduling", "snakeboot.oauth2", "snakeboot.rabbitmq", "snakeboot.event_publication", "snakeboot.scheduler_lock", "snakeboot.application", "snakeboot.stereotype"]
 forbidden_modules = [
     "fastapi",
     "starlette",
@@ -160,6 +160,37 @@ forbidden_modules = [
     "snakeboot.rabbitmq",
     "snakeboot.oauth2",
     "snakeboot.openapi",
+    "snakeboot.cache",
+    "snakeboot.testing",
+    "snakeboot.actuator",
+    "snakeboot.event_publication",
+    "snakeboot.scheduler_lock",
+    "snakeboot.application",
+]
+
+[[tool.importlinter.contracts]]
+name = "stereotype knows wireup, and no other part of snakeboot"
+type = "forbidden"
+source_modules = ["snakeboot.stereotype"]
+forbidden_modules = [
+    "pydantic",
+    "pydantic_settings",
+    "pika",
+    "jwt",
+    "snakeboot.transaction",
+    "snakeboot.component_scan",
+    "snakeboot.configuration",
+    "snakeboot.security",
+    "snakeboot.tracing",
+    "snakeboot.openapi",
+    "snakeboot.events",
+    "snakeboot.rest",
+    "snakeboot.data",
+    "snakeboot.command_line",
+    "snakeboot.lifecycle",
+    "snakeboot.scheduling",
+    "snakeboot.rabbitmq",
+    "snakeboot.oauth2",
     "snakeboot.cache",
     "snakeboot.testing",
     "snakeboot.actuator",

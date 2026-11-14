@@ -1,7 +1,26 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.13,<0.14`.
+a minor release may break the API: pin `snakeboot>=0.14,<0.15`.
+
+## 0.14.0
+
+- `snakeboot.stereotype`: an application declares its components in snakeboot's terms, like the annotations of
+  `org.springframework.stereotype`, and no longer imports wireup. `@service` (a use case), `@repository` (the adapter
+  of a repository port) and `@component` (anything else) make a class a component: built once, its dependencies by
+  type. They do the same; the name says what the class is, and `stereotype_of(cls)` or
+  `ComponentScan.classes_marked(STEREOTYPE_ATTRIBUTE)` tells an architecture test. `as_type=` names the port others
+  ask for and `qualifier=` tells two components of one type apart, as wireup's `@injectable` does.
+- `@bean` declares a function that builds a component, like a `@Bean` method; `Qualifier("name")` in
+  `Annotated[...]` asks for the component with that qualifier, like `@Qualifier`.
+- Nothing breaks: wireup's `@injectable` and `Inject(qualifier=...)` keep working, also next to the stereotypes, so an
+  application moves when it suits. To move: `from wireup import injectable` becomes
+  `from snakeboot.stereotype import service` (or `repository`, `component`), `@injectable` on a function becomes
+  `@bean`, and `Inject(qualifier=X)` becomes `Qualifier(X)`.
+- New refusals, when the module is imported: a stereotype on a function (`InvalidComponentError`, which names `@bean`),
+  `@bean` on a class, and a class declared `as_type=` an abstract class it does not extend. A Protocol is not checked.
+- The messages of a `@scheduled` or `@rabbit_listener` method on a class that is no component say `add @component`.
+- The README says what an application shares with snakeboot: Pydantic, for a request body, a message and a `Section`.
 
 ## 0.13.2
 

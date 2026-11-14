@@ -1,13 +1,12 @@
 import threading
 from datetime import timedelta
 
-from wireup import injectable
-
 from snakeboot.scheduling import scheduled, scheduler_lock
+from snakeboot.stereotype import component
 from snakeboot.tracing import TraceContext
 
 
-@injectable
+@component
 class HourlyReport:
     """A job that one replica at a time may run; it remembers the trace of every run."""
 

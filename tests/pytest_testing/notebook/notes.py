@@ -3,7 +3,6 @@ from datetime import UTC, datetime
 from typing import override
 
 from pydantic import BaseModel
-from wireup import injectable
 
 from snakeboot.cache import Cache
 from snakeboot.configuration import Section, configuration_properties
@@ -17,6 +16,7 @@ from snakeboot.rest import (
     route,
 )
 from snakeboot.security import Principal
+from snakeboot.stereotype import component
 
 LAST_NOTE = "last-note"
 
@@ -36,7 +36,7 @@ class Clock(ABC):
         """Returns the moment it is now."""
 
 
-@injectable(as_type=Clock)
+@component(as_type=Clock)
 class SystemClock(Clock):
     """The time of the machine."""
 
@@ -53,7 +53,7 @@ class NoticeBoard(ABC):
         """Pins `text` to the board."""
 
 
-@injectable(as_type=NoticeBoard)
+@component(as_type=NoticeBoard)
 class LoggedNoticeBoard(NoticeBoard):
     """A board that only remembers what was pinned."""
 
@@ -83,7 +83,7 @@ class NoteDTO(BaseModel):
     written_at: datetime
 
 
-@injectable
+@component
 class WriteNote:
     """The use case: a writer writes a note, which is pinned and kept as the last one."""
 

@@ -3,9 +3,8 @@
 from dataclasses import dataclass
 from datetime import date
 
-from wireup import injectable
-
 from snakeboot.events import ApplicationEventPublisher, application_event_listener, event_listener
+from snakeboot.stereotype import service
 from tests.events.sample_contexts.proposals.proposals import FollowDeadlineUseCase
 
 
@@ -15,7 +14,7 @@ class DeadlineConfirmed:
     deadline: date
 
 
-@injectable
+@service
 class ConfirmDeadlineUseCase:
     """Funding's use case: a call's deadline is confirmed, which every context may hear."""
 

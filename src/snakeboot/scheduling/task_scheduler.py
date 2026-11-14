@@ -99,7 +99,7 @@ class TaskScheduler(Lifecycle, component=False):
             component: object = self._components.get(marked.owner)
         except LookupError as error:
             raise InvalidScheduledTaskError(
-                f"{marked.name} is @scheduled, but {marked.owner.__qualname__} is no component: add @injectable."
+                f"{marked.name} is @scheduled, but {marked.owner.__qualname__} is no component: add @component."
             ) from error
         run: Callable[[], None] = getattr(component, marked.method.__name__)
         lock: SchedulerLockMapping | None = getattr(marked.method, SCHEDULER_LOCK_ATTRIBUTE, None)

@@ -4,7 +4,6 @@ import sys
 
 import pytest
 import wireup
-from wireup import injectable
 
 from snakeboot.configuration import (
     CONFIGURATION_KEY,
@@ -14,13 +13,14 @@ from snakeboot.configuration import (
     load_configuration,
     sections_declared_in,
 )
+from snakeboot.stereotype import component
 from tests.configuration.sample_service import greeting_properties
 from tests.configuration.sample_service.greeting_properties import FarewellProperties, GreetingProperties
 
 SAMPLE = "tests.configuration.sample_service"
 
 
-@injectable
+@component
 class Greeter:
     def __init__(self, properties: GreetingProperties) -> None:
         self.properties = properties

@@ -43,7 +43,7 @@ def scheduled(
 ) -> MethodMarker:
     """Runs a method of a component periodically, like Spring's `@Scheduled`.
 
-        @injectable
+        @component
         class AbortExpiredGamesJob:
             def __init__(self, abort_expired_games: AbortExpiredGamesUseCase) -> None: ...
 

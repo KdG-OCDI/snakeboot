@@ -1,6 +1,6 @@
 """Technical library: methods that run periodically, like Spring's `@Scheduled`.
 
-    @injectable                                            # a component, like @Component
+    @component                                             # a component, like @Component
     class AbortExpiredGamesJob:
         def __init__(self, abort_expired_games: AbortExpiredGamesUseCase) -> None: ...
 

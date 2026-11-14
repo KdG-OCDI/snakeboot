@@ -182,7 +182,7 @@ def _endpoint_of(
         component: object = components.get(marked.owner)
     except LookupError as error:
         raise InvalidRabbitListenerError(
-            f"{marked.name} listens, but {marked.owner.__qualname__} is no component: add @injectable."
+            f"{marked.name} listens, but {marked.owner.__qualname__} is no component: add @component."
         ) from error
     handle: Callable[[object], None] = getattr(component, method.__name__)
 

@@ -3,7 +3,6 @@
 import pytest
 import wireup
 from pydantic import ValidationError
-from wireup import injectable
 
 from snakeboot.application import ApplicationContext
 from snakeboot.boot import CONDITIONAL_MODULES
@@ -16,6 +15,7 @@ from snakeboot.rabbitmq.rabbitmq_injectable import (
     rabbit_listener_containers,
     rabbit_template,
 )
+from snakeboot.stereotype import bean
 from tests.command_line.sample_commands.applications import ApplicationWithoutCommands
 from tests.rabbitmq.stand_ins import rabbit_properties
 from tests.scheduling.stand_ins import CountingTaskDecorator, ScannedComponents
@@ -105,15 +105,15 @@ def test_a_retry_table_that_cannot_work_stops_the_start(retry: dict[str, object]
 
 
 def test_wireup_provides_the_template_and_the_listener_containers() -> None:
-    @injectable
+    @bean
     def properties() -> RabbitProperties:
         return rabbit_properties(auto_startup=False)
 
-    @injectable(as_type=ApplicationComponents)
+    @bean(as_type=ApplicationComponents)
     def components() -> ApplicationComponents:
         return ScannedComponents("tests.component_scan.sample_project")
 
-    @injectable(as_type=TaskDecorator)
+    @bean(as_type=TaskDecorator)
     def decorator() -> TaskDecorator:
         return CountingTaskDecorator()
 

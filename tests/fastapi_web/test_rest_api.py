@@ -7,11 +7,11 @@ import wireup
 from fastapi import FastAPI
 from fastapi.exceptions import RequestValidationError
 from fastapi.testclient import TestClient
-from wireup import injectable
 
 from snakeboot.configuration import ServerProperties
 from snakeboot.fastapi_web import invalid_request_of, rest_api
 from snakeboot.rest import InvalidRestControllerError, RequestProblem
+from snakeboot.stereotype import bean
 from tests.rest.sample_application import (
     DoublySecuredApplication,
     GreetingApplication,
@@ -30,7 +30,7 @@ from tests.rest.secured.who_am_i_rest_controller import WhoAmIRestController
 from tests.rest.unadvised.echo_rest_controller import EchoRestController
 
 
-@injectable
+@bean
 def greeter() -> Greeter:
     return Greeter()
 

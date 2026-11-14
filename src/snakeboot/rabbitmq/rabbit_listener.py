@@ -41,7 +41,7 @@ class RabbitListenerMapping:
 def rabbit_listener(*, queue: str, exchange: str, routing_key: str, dead_letter: bool = False) -> MethodMarker:
     """Makes a method of a component receive the messages of a queue, like Spring AMQP's `@RabbitListener`.
 
-        @injectable
+        @component
         class GameStartedListener:
             def __init__(self, start_game: StartGameUseCase) -> None: ...
 

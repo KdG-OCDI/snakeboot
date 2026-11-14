@@ -342,7 +342,7 @@ def test_a_listener_of_a_class_that_is_no_component_stops_the_start_up(
         ScannedComponents(WORKING), decorator, connection_factory_of(broker), auto_startup=False
     )
 
-    with pytest.raises(InvalidRabbitListenerError, match="GameStartedListener is no component: add @injectable"):
+    with pytest.raises(InvalidRabbitListenerError, match="GameStartedListener is no component: add @component"):
         containers.start()
 
 

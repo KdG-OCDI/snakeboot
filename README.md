@@ -12,12 +12,15 @@ classes you can read in an afternoon, and none of them knows anything about your
 
 An application speaks snakeboot, never the frameworks underneath: its entry points, controllers, entities,
 repositories, migrations, commands, listeners, configuration and tests import nothing of FastAPI, Starlette,
-SQLAlchemy or Alembic. snakeboot binds them, so another framework means another binding, not other applications.
+SQLAlchemy, Alembic or wireup. snakeboot binds them, so another framework means another binding, not other
+applications. The one library an application does share with snakeboot is Pydantic: a request body, a message and a
+`Section` are Pydantic models.
 
 | snakeboot | Spring Boot | Needs |
 |---|---|---|
 | `@transactional`, `after_commit` | `@Transactional`, `@TransactionalEventListener(AFTER_COMMIT)` | nothing |
 | `@application_root`, `ComponentScan` | `@SpringBootApplication`, `@ComponentScan` | nothing |
+| `@component`, `@service`, `@repository`, `@bean`, `Qualifier` | `@Component`, `@Service`, `@Repository`, `@Bean`, `@Qualifier` | wireup |
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
 | `@application_module_listener`, the event publication registry | Spring Modulith's `@ApplicationModuleListener`, `EventPublicationRegistry` (a transactional outbox) | wireup; `snakeboot[data]` for the registry |
 | `@configuration_properties`, `Section`, `application-<profile>.toml` | `@ConfigurationProperties`, profiles | `snakeboot[configuration]` |
@@ -91,6 +94,38 @@ builds wireup's container from the component scan, and adds what the tables ask 
 conditional auto-configuration: SQLAlchemy and the transaction manager of `@transactional` with `[database]`, Redis
 with `[cache]`, RabbitMQ with `[rabbitmq]`. An application without a table imports none of those. The REST API lives
 under `/api/` (Swagger UI at `/api/docs`), next to `/health` and `/metrics`.
+
+**Components.** A class joins the container under the name of what it is, like the annotations of
+`org.springframework.stereotype`: `@service` for a use case, `@repository` for the adapter of a repository port,
+`@component` for anything else. The three do the same: the class is built once, its constructor receives its
+dependencies by type, and a missing one stops the start. `as_type` names the port others ask for, as a Spring bean is
+found by the interface it implements; a class that does not extend the abstract class it names is refused when its
+module is imported. `@bean` is a function that builds a component, like a `@Bean` method: for a class the application
+does not own. `qualifier` tells two components of one type apart, and a parameter asks for one with `Qualifier`.
+
+```python
+@service
+class PlaceBidUseCase:
+    def __init__(self, auctions: AuctionRepositoryPort, clock: ClockPort) -> None: ...
+
+
+@repository(as_type=AuctionRepositoryPort)
+class AuctionPersistenceAdapter(AuctionRepositoryPort):
+    def __init__(self, records: AuctionRecords) -> None: ...  # a CrudRepository needs no decorator
+
+
+@bean(qualifier="templates")
+def template_opener(properties: DownloadProperties) -> OpenerDirector: ...
+
+
+@component
+class TemplateDownloadAdapter:
+    def __init__(self, opener: Annotated[OpenerDirector, Qualifier("templates")]) -> None: ...
+```
+
+A controller, a listener, a command, a `Lifecycle` and a section are components by their own decorator or base class
+and take none of these. wireup stays underneath, so its own `@injectable` still works where an application has it;
+`stereotype_of` tells an architecture test what a class declared.
 
 **Where the files live.** The application package is the package of the class marked with `@application_root`, also
 when `base_packages` names others: `myapp` in the example above, not `myapp_core`. It is to snakeboot what the root of
@@ -283,7 +318,7 @@ application has `[database]`. A nested `@transactional` call is a savepoint; `af
 commit and is dropped by a rollback.
 
 ```python
-@injectable
+@service
 class CancelRegistrationUseCase:
     @transactional
     def execute(self, request: CancelRegistrationRequestDTO) -> None:
@@ -510,7 +545,7 @@ with RabbitMQ's `x-death` header saying where and why. The `RabbitTemplate` send
 broker. `[rabbitmq.listener] auto_startup = false` keeps a process from consuming.
 
 ```python
-@injectable
+@component
 class GameStartedListener:
     @rabbit_listener(
         queue="tictactoe.game-started",
@@ -774,6 +809,7 @@ architecture test compare what the source declares with what the component scan 
 * An application imports snakeboot, never the framework underneath: only `snakeboot.fastapi_web`,
   `snakeboot.sqlalchemy_data`, `snakeboot.redis_cache` and `snakeboot.boot` know FastAPI, SQLAlchemy, Alembic or Redis,
   and only `snakeboot.pytest_testing` knows pytest, so another framework means another binding, not other applications.
+  It names no container either: `snakeboot.stereotype` declares its components, on wireup.
 * Each package knows as little as possible; `uv run lint-imports` enforces it.
 
 ## Develop

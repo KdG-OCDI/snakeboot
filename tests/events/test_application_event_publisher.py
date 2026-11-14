@@ -5,7 +5,6 @@ from dataclasses import dataclass
 
 import pytest
 import wireup
-from wireup import injectable
 
 from snakeboot.events import (
     ApplicationEventPublisher,
@@ -20,6 +19,7 @@ from snakeboot.events.application_event_publisher_injectable import (
     event_listener_method_processor,
 )
 from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
+from snakeboot.stereotype import bean, service
 from snakeboot.testing import RecordingTransactionManager
 from snakeboot.transaction import TransactionManagerRegistry, transactional
 
@@ -186,7 +186,7 @@ def test_the_start_up_hands_every_listener_wireup_knows_to_the_publisher(
 ) -> None:
     diary = Diary()
 
-    @injectable
+    @bean
     def shared_diary() -> Diary:
         return diary
 
@@ -210,7 +210,7 @@ class SomethingFollowedUp:
     what: str
 
 
-@injectable
+@service
 class FollowUpUseCase:
     """Publishes an event of its own: what a listener between two bounded contexts calls."""
 
@@ -247,7 +247,7 @@ def test_a_listener_may_depend_on_a_use_case_that_publishes_events() -> None:
     """Regression (#13): wireup refused to build listener -> use case -> publisher -> every listener."""
     diary = Diary()
 
-    @injectable
+    @bean
     def shared_diary() -> Diary:
         return diary
 

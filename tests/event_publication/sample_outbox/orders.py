@@ -2,10 +2,9 @@ from dataclasses import dataclass
 from datetime import datetime
 from typing import Annotated, Protocol
 
-from wireup import injectable
-
 from snakeboot.data import CrudRepository, Id, entity
 from snakeboot.events import ApplicationEventPublisher, application_event_listener, application_module_listener
+from snakeboot.stereotype import service
 from snakeboot.transaction import transactional
 
 
@@ -38,7 +37,7 @@ class InvoiceRecords(CrudRepository[InvoiceRecord, str], Protocol):
     """The invoices sent."""
 
 
-@injectable
+@service
 class InvoicingService:
     """Stands in for a service the invoicing module calls; a test takes it down."""
 
@@ -46,7 +45,7 @@ class InvoicingService:
         self.down = False
 
 
-@injectable
+@service
 class PlaceOrderUseCase:
     def __init__(self, orders: OrderRecords, events: ApplicationEventPublisher) -> None:
         self._orders = orders

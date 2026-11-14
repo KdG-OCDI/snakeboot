@@ -5,12 +5,12 @@ from typing import Annotated, Protocol
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
-from wireup import injectable
 
 from snakeboot.component_scan import application_root
 from snakeboot.data import Column, CrudRepository, Id, entity
 from snakeboot.events import ApplicationEventPublisher
 from snakeboot.rabbitmq import RabbitTemplate, RejectAndDontRequeueError, rabbit_listener
+from snakeboot.stereotype import component
 from snakeboot.transaction import transactional
 
 EXCHANGE = "parcels"
@@ -50,7 +50,7 @@ class ParcelDeliveredMessage(BaseModel):
     parcel_id: UUID
 
 
-@injectable
+@component
 class SendParcel:
     """The use case: a parcel is kept, its event published and the carrier asked to deliver it."""
 
@@ -69,7 +69,7 @@ class SendParcel:
         return parcel.parcel_id
 
 
-@injectable
+@component
 class ParcelDeliveredListener:
     """Hears from the carrier that a parcel arrived; an unknown parcel is refused for good, into the dead-letter
     queue."""
@@ -88,7 +88,7 @@ class ParcelDeliveredListener:
         self._parcels.save(parcel)
 
 
-@injectable
+@component
 class CarrierListener:
     """Stands in for the carrier on the same broker: it hears every message about a parcel."""
 

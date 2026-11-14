@@ -24,7 +24,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 
 from pydantic import BaseModel
-from wireup import injectable
+from snakeboot.stereotype import repository
 
 from snakeboot.rest import error_answer, exception_handler, rest_controller, rest_controller_advice, route
 
@@ -47,7 +47,7 @@ class AuctionRepositoryPort(ABC):
     def save(self, auction: Auction) -> None: ...
 
 
-@injectable(as_type=AuctionRepositoryPort)
+@repository(as_type=AuctionRepositoryPort)
 class InMemoryAuctionRepository(AuctionRepositoryPort):
     def __init__(self) -> None:
         self._auctions = {"a1": Auction("a1", highest_bid=100)}

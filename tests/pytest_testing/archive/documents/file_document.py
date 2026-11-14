@@ -1,6 +1,6 @@
 from pydantic import BaseModel
-from wireup import injectable
 
+from snakeboot.stereotype import component
 from snakeboot.transaction import transactional
 from tests.pytest_testing.archive.documents.documents import DocumentRecord, DocumentRecords
 
@@ -11,7 +11,7 @@ class DocumentDTO(BaseModel):
     clerk: str
 
 
-@injectable
+@component
 class FileDocument:
     """The use case: a clerk files a document, which the database numbers."""
 

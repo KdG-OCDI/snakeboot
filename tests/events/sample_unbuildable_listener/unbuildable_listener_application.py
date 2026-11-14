@@ -1,9 +1,8 @@
 from dataclasses import dataclass
 
-from wireup import injectable
-
 from snakeboot.component_scan import application_root
 from snakeboot.events import application_event_listener, event_listener
+from snakeboot.stereotype import component
 
 
 @application_root
@@ -16,7 +15,7 @@ class SignedUp:
     member: str
 
 
-@injectable
+@component
 class UnreachableMailer:
     """Connects to its mail server when it is built, and that server is down."""
 

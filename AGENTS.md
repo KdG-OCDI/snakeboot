@@ -9,8 +9,8 @@
 * Imitate the basics of Spring Boot, not Spring. A feature belongs here when two applications need it
   and it knows nothing of either application's domain.
 * Each package knows as little as possible. `transaction`, `component_scan`, `openapi`, `cache`, `security`,
-  `tracing` and `testing` use the standard library only; `events`, `rest`, `data`, `command_line` and `actuator` add
-  wireup; `event_publication` and `scheduler_lock` keep snakeboot's own tables in snakeboot's terms, through `data`;
+  `tracing` and `testing` use the standard library only; `stereotype`, `events`, `rest`, `data`, `command_line`
+  and `actuator` add wireup; `event_publication` and `scheduler_lock` keep snakeboot's own tables in snakeboot's terms, through `data`;
   `application` starts an application in no framework's terms. Each binding knows one framework: `fastapi_web`
   publishes `rest` and `actuator` on FastAPI, `sqlalchemy_data` binds `data` and `transaction` to SQLAlchemy and
   Alembic, `redis_cache` binds `cache` to Redis, `pytest_testing` binds `testing` to pytest (its plugin starts
@@ -19,7 +19,9 @@
 * An application imports snakeboot, never the framework underneath. Only the bindings and `boot` know FastAPI,
   Starlette, SQLAlchemy, Alembic or Redis; whatever an application writes (entry points, controllers, entities,
   repositories, migrations, commands, listeners, sections, tests) is in snakeboot's terms, so a binding to another
-  framework changes no application. `tests/test_without_a_web_framework.py` checks it at run time.
+  framework changes no application. `tests/test_without_a_web_framework.py` checks it at run time. The container
+  is no exception: an application declares its components with `stereotype`, never with wireup, which
+  `tests/test_applications_name_no_container.py` checks in the sample applications.
 * Fail at start-up, not at the first request: a broken controller, advice, entity, repository, listener, scheduled
   method or root raises while the application starts.
 * Clean Code (Ruff and mypy strict enforce most of it): names that reveal intent, one level of

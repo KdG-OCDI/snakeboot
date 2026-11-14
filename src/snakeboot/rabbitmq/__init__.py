@@ -2,14 +2,14 @@
 
 Extra `rabbitmq`.
 
-    @injectable                                                    # a component, like @Component
+    @component                                                     # a component, like @Component
     class GameStartedListener:
         def __init__(self, start_game: StartGameUseCase) -> None: ...
 
         @rabbit_listener(queue="tictactoe.game-started", exchange="games", routing_key="game.tictactoe.started")
         def on_game_started(self, message: GameStartedMessage) -> None: ...   # a pydantic model, a dict or bytes
 
-    @injectable(as_type=PlatformEventPublisherPort)                # an adapter that sends
+    @component(as_type=PlatformEventPublisherPort)                 # an adapter that sends
     class RabbitMqPlatformEventPublisherAdapter(PlatformEventPublisherPort):
         def __init__(self, rabbit: RabbitTemplate) -> None: ...
 

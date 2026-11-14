@@ -1,5 +1,4 @@
-from wireup import injectable
-
+from snakeboot.stereotype import component
 from tests.pytest_testing.archive.documents.documents import DocumentRecords
 from tests.pytest_testing.archive.documents.file_document import DocumentDTO
 
@@ -8,7 +7,7 @@ class DocumentNotFoundError(LookupError):
     """The archive holds no document of that number."""
 
 
-@injectable
+@component
 class ReadDocument:
     """The use case: a clerk reads a document that was filed."""
 

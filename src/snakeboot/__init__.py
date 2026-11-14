@@ -4,6 +4,7 @@ What an application imports, in no framework's terms:
 
     snakeboot.boot            run, asgi_application, TestApplication             (extras: configuration, web)
     snakeboot.component_scan  @application_root, ComponentScan                    (no dependencies)
+    snakeboot.stereotype      @component, @service, @repository, @bean            (wireup)
     snakeboot.transaction     @transactional, after_commit, TransactionManager    (no dependencies)
     snakeboot.events          ApplicationEventPublisher, @transactional_event_listener   (wireup)
     snakeboot.configuration   @configuration_properties, Section, ServerProperties   (extra: configuration)

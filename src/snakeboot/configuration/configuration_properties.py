@@ -18,7 +18,7 @@ def configuration_properties[M: type[Section]](prefix: str) -> Callable[[M], M]:
     The section is a component of the module that declares it: the decorator puts a wireup provider next to it,
     `provide_<prefix>_properties`, which hands out the object the configuration read. So when the component scan
     puts that module in the container, the section comes along, and an adapter asks for it by type. Give it no
-    `@injectable`, as a Spring Boot record with `@ConfigurationProperties` has no `@Component`: wireup would build
+    `@component`, as a Spring Boot record with `@ConfigurationProperties` has no `@Component`: wireup would build
     the model from its fields, not from the files.
     """
     if not PREFIX.fullmatch(prefix):

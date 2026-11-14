@@ -5,7 +5,6 @@ import threading
 
 import pytest
 import wireup
-from wireup import injectable
 
 from snakeboot.application.run_lifecycle_command import run_until
 from snakeboot.events import ApplicationEventPublisher, application_event_listener, event_listener
@@ -16,6 +15,7 @@ from snakeboot.events.application_event_publisher_injectable import (
 from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.lifecycle import ApplicationLifecycle, ApplicationReadyEvent
 from snakeboot.lifecycle.application_lifecycle_injectable import application_lifecycle
+from snakeboot.stereotype import bean
 from tests.lifecycle.sample_components import Early, Journal, Recording, StillAbstract, Wired
 
 
@@ -97,7 +97,7 @@ def test_a_concrete_subclass_is_a_component_and_an_abstract_one_or_a_base_is_not
 def test_wireup_hands_every_component_to_the_lifecycle_and_ready_goes_to_the_listeners() -> None:
     journal = Journal()
 
-    @injectable
+    @bean
     def shared_journal() -> Journal:
         return journal
 

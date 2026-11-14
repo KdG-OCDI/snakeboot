@@ -1,12 +1,11 @@
 from argparse import ArgumentParser, Namespace
 from typing import override
 
-from wireup import injectable
-
 from snakeboot.command_line import CommandLineError, CommandLineRunner
+from snakeboot.stereotype import component
 
 
-@injectable
+@component
 class Journal:
     """Stands in for a port: remembers what the commands did."""
 

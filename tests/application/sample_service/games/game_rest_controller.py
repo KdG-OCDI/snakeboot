@@ -3,9 +3,9 @@ from functools import partial
 from uuid import UUID, uuid4
 
 from pydantic import BaseModel
-from wireup import injectable
 
 from snakeboot.rest import error_answer, exception_handler, rest_controller, rest_controller_advice, route
+from snakeboot.stereotype import service
 from snakeboot.transaction import after_commit, transactional
 from tests.application.sample_service.games.game_record import GameRecord, GameRecords
 
@@ -26,7 +26,7 @@ class UnknownGameError(LookupError):
     """No game has the id."""
 
 
-@injectable
+@service
 class Announcer:
     """Stands in for a port that tells the world about a new game, once its transaction committed."""
 

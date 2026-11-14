@@ -1,8 +1,8 @@
 from collections import Counter
 
 from pydantic import BaseModel
-from wireup import injectable
 
+from snakeboot.stereotype import component
 from tests.pytest_testing.library.catalogue.catalogue import Catalogue
 from tests.pytest_testing.library.loans.loan_properties import LoanProperties
 
@@ -20,7 +20,7 @@ class TooManyLoansError(ValueError):
     """The member has as many books as `[loans] max_loans` allows."""
 
 
-@injectable
+@component
 class LendBook:
     """The use case: a member borrows a book that is on the shelf, up to `[loans] max_loans` at once."""
 

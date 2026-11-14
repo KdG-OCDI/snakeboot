@@ -18,6 +18,7 @@ FRAMEWORKS = ("fastapi", "starlette", "uvicorn", "sqlalchemy", "alembic", "psyco
 
 PACKAGES_OF_AN_APPLICATION = (
     "snakeboot.boot",
+    "snakeboot.stereotype",
     "snakeboot.rest",
     "snakeboot.data",
     "snakeboot.cache",

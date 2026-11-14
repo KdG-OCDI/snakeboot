@@ -30,7 +30,7 @@ class ShopApplication:
 GREETING = """\
 from abc import ABC, abstractmethod
 
-from wireup import injectable
+from snakeboot.stereotype import component
 
 from snakeboot.rest import rest_controller, route
 
@@ -40,7 +40,7 @@ class Greeter(ABC):
     def greet(self) -> str: ...
 
 
-@injectable(as_type=Greeter)
+@component(as_type=Greeter)
 class FriendlyGreeter(Greeter):
     def greet(self) -> str:
         return "Welcome"

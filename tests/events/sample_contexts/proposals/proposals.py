@@ -3,9 +3,8 @@
 from dataclasses import dataclass
 from datetime import date
 
-from wireup import injectable
-
 from snakeboot.events import ApplicationEventPublisher
+from snakeboot.stereotype import component, service
 
 
 @dataclass(frozen=True)
@@ -14,7 +13,7 @@ class ProposalDeadlineMoved:
     deadline: date
 
 
-@injectable
+@component
 class ProposalDeadlines:
     """The proposals of every call and their deadlines, in memory."""
 
@@ -22,7 +21,7 @@ class ProposalDeadlines:
         self.by_proposal: dict[str, date | None] = {"ann's proposal": None, "bob's proposal": None}
 
 
-@injectable
+@service
 class FollowDeadlineUseCase:
     """Proposals' use case: every proposal of a call takes its deadline, and the context publishes that it moved."""
 
