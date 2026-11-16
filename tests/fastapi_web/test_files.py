@@ -25,6 +25,7 @@ def client_of(application: type, *, max_upload_size: int | None = None) -> TestC
         allowed_hosts=("*",),
         log_level="INFO",
         max_upload_size=ByteSize(max_upload_size) if max_upload_size is not None else None,
+        banner=None,
     )
     return TestClient(rest_api(application, lambda component: component(), server=server))
 

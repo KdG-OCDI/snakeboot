@@ -24,11 +24,13 @@ class ServerProperties(Section):
         allowed_hosts = ["*"]
         log_level = "INFO"
         max_upload_size = "20MB"  # optional: 1 MiB without it
+        banner = false            # optional: without it, serve and run_lifecycle print snakeboot's banner
 
     The optional `max_upload_size` is the most an `UploadedFile` holds, like `spring.servlet.multipart.max-file-size`:
     a number of bytes, or a size with its unit, "20MB" for 20 million bytes or "20MiB" for 20 times 1024 squared. A
     larger file is refused with `UploadTooLargeError` (413). Without the key it reads as None, and the REST API takes
-    files of up to 1 MiB, Spring Boot's default.
+    files of up to 1 MiB, Spring Boot's default. The optional `banner` says whether a process that keeps running
+    prints snakeboot's banner when it starts, like `spring.main.banner-mode`; without the key it does.
     """
 
     host: str
@@ -38,9 +40,10 @@ class ServerProperties(Section):
     allowed_hosts: tuple[str, ...]
     log_level: Literal["DEBUG", "INFO", "WARNING", "ERROR", "CRITICAL"]
     max_upload_size: ByteSize | None
+    banner: bool | None
 
     @model_validator(mode="before")
     @classmethod
-    def _without_an_upload_limit(cls, table: Any) -> Any:
+    def _with_none_for_a_missing_key(cls, table: Any) -> Any:
         # A profile and the environment change keys and cannot write None: a missing key reads as None.
-        return {"max_upload_size": None, **table} if isinstance(table, dict) else table
+        return {"max_upload_size": None, "banner": None, **table} if isinstance(table, dict) else table

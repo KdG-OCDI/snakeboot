@@ -13,6 +13,8 @@ from argparse import Namespace
 from types import FrameType
 from typing import Final, override
 
+from snakeboot.application.application_context import ApplicationContext
+from snakeboot.application.banner import print_banner
 from snakeboot.command_line import CommandLineRunner
 from snakeboot.lifecycle.application_lifecycle import ApplicationLifecycle
 
@@ -23,8 +25,9 @@ WAKE_UP_SECONDS: Final = 0.5
 class RunLifecycleCommand(CommandLineRunner, command="run_lifecycle"):
     """Starts the lifecycle (listeners, scheduled tasks) without a web server, until SIGTERM or SIGINT."""
 
-    def __init__(self, application_lifecycle: ApplicationLifecycle) -> None:
+    def __init__(self, application_lifecycle: ApplicationLifecycle, context: ApplicationContext) -> None:
         self._lifecycle = application_lifecycle
+        self._configuration = context.configuration
 
     @override
     def run(self, arguments: Namespace) -> None:
@@ -35,6 +38,7 @@ class RunLifecycleCommand(CommandLineRunner, command="run_lifecycle"):
 
         signal.signal(signal.SIGTERM, stop)
         signal.signal(signal.SIGINT, stop)
+        print_banner(self._configuration)
         run_until(stopping, self._lifecycle)
 
 

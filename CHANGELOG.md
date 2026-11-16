@@ -3,6 +3,14 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.15,<0.16`.
 
+## Unreleased
+
+- `serve` and `run_lifecycle` print snakeboot's banner, with its version, where the log lines go, like Spring Boot's
+  banner. `[server] banner = false` leaves it out, like `spring.main.banner-mode=off`; so does
+  `[logging] format = "ecs"`. A command that ends by itself (`migrate`, `help`, an application's own) prints none.
+- Fixed: a test run ended with lines such as `INFO ...OneThreadAtATimePool: Pool recreating`. Since 0.15.0 the
+  applications the tests kept closed after pytest stopped capturing; they now close with the last test, inside it.
+
 ## 0.15.0
 
 - Tests that ask the same application share one start of it, like Spring's test context cache (#17). The pytest

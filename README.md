@@ -76,6 +76,10 @@ itself (the event publisher, the lifecycle, the scheduler, `serve`, `run_lifecyc
 `[server]` says, as Spring Boot starts its embedded server, so the application holds no server entry point.
 `snakeboot.boot` is the one place that names the frameworks underneath.
 
+`serve` and `run_lifecycle`, the processes that keep running, print snakeboot's banner above their first log line,
+like Spring Boot's. `[server] banner = false` leaves it out, like `spring.main.banner-mode=off`, and so does
+`[logging] format = "ecs"`, whose log store reads one JSON object per line.
+
 ```python
 # myapp/myapp_application.py
 @openapi_definition(title="My service", version="1.0.0")
@@ -175,6 +179,7 @@ debug = false
 allowed_hosts = ["*"]       # or "games.example.com", "*.example.com"
 log_level = "INFO"
 max_upload_size = "20MB"    # optional: the largest UploadedFile, 1 MiB without it
+banner = false              # optional: without it, serve and run_lifecycle print snakeboot's banner
 
 [database]                  # PostgreSQL; the password comes from DATABASE__PASSWORD
 host = "db"

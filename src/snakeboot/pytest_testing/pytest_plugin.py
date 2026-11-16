@@ -26,7 +26,16 @@ from snakeboot.testing.injection import Injection, InjectionPoint
 from snakeboot.testing.source_scan import ApplicationNotFoundError, ProjectSources
 
 _SOURCES: Final = pytest.StashKey[ProjectSources]()
-_KEPT: Final = pytest.StashKey[KeptApplications]()
+_KEPT_FIXTURE: Final = "snakeboot_kept_applications"
+
+
+@pytest.fixture(name=_KEPT_FIXTURE, scope="session")
+def kept_applications_fixture() -> Iterator[KeptApplications]:
+    """Keeps the started applications of the run and closes them with its last test, inside what pytest captures:
+    what closing logs is the last test's output, not the run's."""
+    kept = KeptApplications()
+    yield kept
+    kept.close()
 
 
 @pytest.fixture(name=APPLICATION_TEST_FIXTURE)
@@ -35,7 +44,7 @@ def application_test_fixture(request: pytest.FixtureRequest) -> Iterator[Mapping
     fields = injected_fields_of(request.cls) if application_test_of(request.cls) is not None else {}
     parameters = injected_parameters_of(request.function)
     set_up = _set_up_of(request, [*fields.values(), *parameters.values()])
-    kept = _kept_applications_of(request.config)
+    kept: KeptApplications = request.getfixturevalue(_KEPT_FIXTURE)
     running = kept.running(set_up)
     try:
         for name, point in fields.items():
@@ -78,13 +87,6 @@ def _set_up_of(request: pytest.FixtureRequest, points: list[InjectionPoint]) -> 
 
 def _dirties(request: pytest.FixtureRequest) -> bool:
     return dirties_the_application(request.function) or dirties_the_application(request.cls)
-
-
-def _kept_applications_of(config: pytest.Config) -> KeptApplications:
-    if _KEPT not in config.stash:
-        config.stash[_KEPT] = KeptApplications()
-        config.add_cleanup(config.stash[_KEPT].close)
-    return config.stash[_KEPT]
 
 
 def _classes_of(request: pytest.FixtureRequest) -> list[type]:

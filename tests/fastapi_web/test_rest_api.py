@@ -219,6 +219,7 @@ def server(*, allowed_hosts: tuple[str, ...], debug: bool = False) -> ServerProp
         allowed_hosts=allowed_hosts,
         log_level="INFO",
         max_upload_size=None,
+        banner=None,
     )
 
 

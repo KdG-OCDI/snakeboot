@@ -12,6 +12,7 @@ from argparse import ArgumentParser, Namespace
 from typing import Final, override
 
 from snakeboot.application import ApplicationContext
+from snakeboot.application.banner import print_banner
 from snakeboot.boot.entry_points import APPLICATION_VARIABLE, application_variable_of
 from snakeboot.command_line import CommandLineRunner
 from snakeboot.configuration import ServerProperties
@@ -29,6 +30,7 @@ class ServeCommand(CommandLineRunner, command="serve"):
 
     def __init__(self, context: ApplicationContext, server: ServerProperties) -> None:
         self._application = context.application
+        self._configuration = context.configuration
         self._server = server
 
     @classmethod
@@ -41,6 +43,7 @@ class ServeCommand(CommandLineRunner, command="serve"):
         import uvicorn  # noqa: PLC0415  # reason: only serve loads the server, not every command
 
         os.environ[APPLICATION_VARIABLE] = application_variable_of(self._application)
+        print_banner(self._configuration)
         uvicorn.run(
             FACTORY,
             factory=True,
