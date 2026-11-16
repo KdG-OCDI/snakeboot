@@ -38,13 +38,40 @@ class CrudRepository[E, ID](Protocol):
     def save(self, entity: E) -> E:
         """Inserts `entity`, or updates the row with its identifier, and returns the saved entity.
 
-        It fills a `CreatedDate` that is still empty and every `LastModifiedDate`. Use the entity it returns: a
-        number the database gives (`Id(generated=True)`) is in that one.
+        Use the entity it returns: a number the database gives (`Id(generated=True)`) is in that one, and so are the
+        audit fields. Unlike Spring Data JPA's `save`, it writes the change at once (a flush, not a commit), so a broken
+        constraint or a lost update (`Version()`) is raised here, and a generated number is known; `save_and_flush`
+        says so explicitly.
+        """
+        ...
+
+    def save_and_flush(self, entity: E) -> E:
+        """Saves `entity` and writes every pending change of the transaction now, like `JpaRepository.saveAndFlush`.
+
+        A flush is no commit: a later rollback still undoes the change.
         """
         ...
 
     def save_all(self, entities: Iterable[E]) -> list[E]:
-        """Saves every entity, and returns the saved ones in the same order."""
+        """Saves every entity, and returns the saved ones in the same order.
+
+        One atomic operation, like Spring Data JPA's `saveAll`: without a running transaction it runs in one of its
+        own, which commits only when every entity was saved; one that fails, or an `entities` that raises while it is
+        read, rolls back every change of the call. Inside a running transaction it joins it, and its failure marks
+        that transaction rollback-only.
+        """
+        ...
+
+    def save_all_and_flush(self, entities: Iterable[E]) -> list[E]:
+        """Saves every entity, as `save_all`, and writes every pending change of the transaction now."""
+        ...
+
+    def flush(self) -> None:
+        """Writes every pending change of the running transaction to the database now, like `JpaRepository.flush`.
+
+        Changes of entities the transaction loaded are written too, with their audit fields; nothing commits.
+        Outside a transaction there is nothing pending.
+        """
         ...
 
     def find_by_id(self, identifier: ID) -> E | None:

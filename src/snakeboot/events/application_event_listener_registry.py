@@ -9,6 +9,9 @@ from snakeboot.events.event_listener_markers import LISTENER_MAPPING_ATTRIBUTE, 
 
 _SELF_AND_EVENT: Final = 2
 
+_RETURNS_NOTHING: Final = (inspect.Signature.empty, None, type(None), "None")
+"""The return annotations of a listener method: none at all, or None."""
+
 
 @dataclass(frozen=True, slots=True)
 class ListenerMethod:
@@ -76,7 +79,14 @@ def _receiver(listener: object, name: str, method: Callable[..., Any]) -> Callab
     owner = f"{type(listener).__name__}.{name}"
     if inspect.iscoroutinefunction(method):
         raise InvalidApplicationEventListenerError(f"{owner} is async; listeners are synchronous.")
-    if len(inspect.signature(method).parameters) != _SELF_AND_EVENT:
+    signature = inspect.signature(method)
+    if len(signature.parameters) != _SELF_AND_EVENT:
         raise InvalidApplicationEventListenerError(f"{owner} must take exactly one argument: the event.")
+    if signature.return_annotation not in _RETURNS_NOTHING:
+        raise InvalidApplicationEventListenerError(
+            f"{owner} returns {signature.return_annotation!r}, but nobody receives what a listener returns: snakeboot "
+            "does not publish it as Spring does. Return None, and publish a follow-up event through the "
+            "ApplicationEventPublisher."
+        )
     receive: Callable[[object], None] = getattr(listener, name)
     return receive

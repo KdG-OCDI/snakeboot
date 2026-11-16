@@ -21,7 +21,7 @@ from snakeboot.events.application_event_publisher_injectable import (
 from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.stereotype import bean, service
 from snakeboot.testing import RecordingTransactionManager
-from snakeboot.transaction import TransactionManagerRegistry, transactional
+from snakeboot.transaction import TransactionManagerRegistry, TransactionPhase, transactional
 
 
 @dataclass(frozen=True)
@@ -64,6 +64,34 @@ class AfterCommitListener:
     @transactional_event_listener(SomethingHappened)
     def write_down(self, event: SomethingHappened) -> None:
         self._diary.entries.append(f"after commit: {event.what}")
+
+
+@application_event_listener
+class FallbackListener:
+    def __init__(self, diary: Diary) -> None:
+        self._diary = diary
+
+    @transactional_event_listener(SomethingHappened, fallback_execution=True)
+    def write_down(self, event: SomethingHappened) -> None:
+        self._diary.entries.append(f"fallback: {event.what}")
+
+
+@application_event_listener
+class PhasesListener:
+    def __init__(self, diary: Diary) -> None:
+        self._diary = diary
+
+    @transactional_event_listener(SomethingHappened, phase=TransactionPhase.BEFORE_COMMIT)
+    def before_commit(self, event: SomethingHappened) -> None:
+        self._diary.entries.append(f"before commit: {event.what}")
+
+    @transactional_event_listener(SomethingHappened, phase=TransactionPhase.AFTER_ROLLBACK)
+    def after_rollback(self, event: SomethingHappened) -> None:
+        self._diary.entries.append(f"after rollback: {event.what}")
+
+    @transactional_event_listener(SomethingHappened, phase=TransactionPhase.AFTER_COMPLETION)
+    def after_completion(self, event: SomethingHappened) -> None:
+        self._diary.entries.append(f"after completion: {event.what}")
 
 
 @pytest.fixture
@@ -141,16 +169,16 @@ def test_listeners_receive_events_in_a_stable_order_by_name(
     transaction_manager: RecordingTransactionManager,
 ) -> None:
     diary = Diary()
-    publisher = ApplicationEventPublisher([ImmediateListener(diary), AfterCommitListener(diary)])
+    publisher = ApplicationEventPublisher([ImmediateListener(diary), FallbackListener(diary)])
 
     publisher.publish_all([SomethingHappened("first"), SomethingHappened("second")])
 
     assert diary.entries == [
-        "after commit: first",
+        "fallback: first",
         "at once: first",
-        "after commit: second",
+        "fallback: second",
         "at once: second",
-    ], "outside a transaction an after-commit listener runs at once; AfterCommitListener sorts first"
+    ], "outside a transaction a fallback listener runs at once; FallbackListener sorts first"
 
 
 class WithoutListenerMethods:
@@ -200,7 +228,8 @@ def test_the_start_up_hands_every_listener_wireup_knows_to_the_publisher(
         ]
     )
     container.get(EventListenerMethodProcessor).register_listeners()
-    container.get(ApplicationEventPublisher).publish(SomethingHappened("wired"))
+    with transaction_manager.atomic():
+        container.get(ApplicationEventPublisher).publish(SomethingHappened("wired"))
 
     assert sorted(diary.entries) == ["after commit: wired", "at once: wired"]
 
@@ -299,3 +328,157 @@ def test_the_library_ships_the_publisher_so_applications_register_nothing() -> N
 
     assert isinstance(container.get(ApplicationEventPublisher), ApplicationEventPublisher)
     assert isinstance(container.get(EventListenerMethodProcessor), EventListenerMethodProcessor)
+
+
+def test_outside_a_transaction_a_transactional_listener_is_skipped_and_the_others_still_hear(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher([AfterCommitListener(diary), ImmediateListener(diary)])
+
+    publisher.publish(SomethingHappened("no transaction"))
+
+    assert diary.entries == ["at once: no transaction"]
+
+
+def test_without_a_transaction_manager_a_transactional_listener_is_skipped_and_a_fallback_one_hears() -> None:
+    TransactionManagerRegistry.uninstall()
+    diary = Diary()
+    publisher = ApplicationEventPublisher([AfterCommitListener(diary), FallbackListener(diary)])
+
+    publisher.publish(SomethingHappened("no database"))
+
+    assert diary.entries == ["fallback: no database"]
+
+
+def test_a_fallback_listener_still_waits_for_a_running_transaction_and_never_hears_a_rollback(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher([FallbackListener(diary)])
+    seen_inside: list[list[str]] = []
+
+    @transactional
+    def change(fail: bool) -> None:
+        publisher.publish(SomethingHappened("fail" if fail else "commit"))
+        seen_inside.append(list(diary.entries))
+        if fail:
+            raise ConnectionError("database gone")
+
+    change(False)
+    with pytest.raises(ConnectionError):
+        change(True)
+
+    assert seen_inside == [[], ["fallback: commit"]]
+    assert diary.entries == ["fallback: commit"]
+
+
+def test_an_event_published_after_its_transaction_ended_is_published_outside_one(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher([AfterCommitListener(diary)])
+
+    @transactional
+    def save() -> None:
+        pass
+
+    save()
+    publisher.publish(SomethingHappened("too late"))
+
+    assert diary.entries == []
+
+
+def test_listeners_hear_the_phases_of_a_committed_transaction(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher([PhasesListener(diary), AfterCommitListener(diary)])
+    seen_inside: list[list[str]] = []
+
+    @transactional
+    def change() -> None:
+        publisher.publish(SomethingHappened("x"))
+        seen_inside.append(list(diary.entries))
+
+    change()
+
+    assert seen_inside == [[]]
+    assert diary.entries == ["before commit: x", "after commit: x", "after completion: x"]
+
+
+def test_listeners_hear_the_phases_of_a_rolled_back_transaction(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher([PhasesListener(diary), AfterCommitListener(diary)])
+
+    @transactional
+    def change() -> None:
+        publisher.publish(SomethingHappened("x"))
+        raise ConnectionError("database gone")
+
+    with pytest.raises(ConnectionError):
+        change()
+
+    assert diary.entries == ["after rollback: x", "after completion: x"]
+
+
+def test_a_failing_before_commit_listener_rolls_the_transaction_back(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    @application_event_listener
+    class Refusing:
+        @transactional_event_listener(SomethingHappened, phase=TransactionPhase.BEFORE_COMMIT)
+        def refuse(self, event: SomethingHappened) -> None:
+            raise PermissionError(event.what)
+
+    publisher = ApplicationEventPublisher([Refusing()])
+
+    @transactional
+    def change() -> None:
+        publisher.publish(SomethingHappened("refused"))
+
+    with pytest.raises(PermissionError, match="refused"):
+        change()
+
+    assert (transaction_manager.committed, transaction_manager.rolled_back) == (0, 1)
+
+
+@application_event_listener
+class ReturningListener:
+    @event_listener(SomethingHappened)
+    def follow_up(self, event: SomethingHappened) -> SomethingElseHappened:
+        return SomethingElseHappened(event.what)
+
+
+def test_a_listener_that_returns_a_follow_up_event_is_refused_since_nobody_publishes_it() -> None:
+    with pytest.raises(InvalidApplicationEventListenerError, match=r"ReturningListener\.follow_up returns"):
+        ApplicationEventPublisher([ReturningListener()])
+
+
+@application_event_listener
+class PublishingFollowUpListener:
+    def __init__(self, diary: Diary, events: ApplicationEventPublisher) -> None:
+        self._diary = diary
+        self._events = events
+
+    @event_listener(SomethingHappened)
+    def follow_up(self, event: SomethingHappened) -> None:
+        self._events.publish(SomethingElseHappened(event.what))
+
+    @event_listener(SomethingElseHappened)
+    def write_down(self, event: SomethingElseHappened) -> None:
+        self._diary.entries.append(f"followed up: {event.what}")
+
+
+def test_a_listener_publishes_a_follow_up_event_through_the_publisher(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    diary = Diary()
+    publisher = ApplicationEventPublisher()
+    publisher.register([PublishingFollowUpListener(diary, publisher)])
+
+    publisher.publish(SomethingHappened("signed up"))
+
+    assert diary.entries == ["followed up: signed up"]

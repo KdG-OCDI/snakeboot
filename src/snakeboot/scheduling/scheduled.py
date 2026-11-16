@@ -17,7 +17,7 @@ class InvalidScheduledTaskError(TypeError):
 
 @dataclass(frozen=True, slots=True)
 class ScheduledMapping:
-    """When a `@scheduled` method runs: every `fixed_rate` from start to start, or `fixed_delay` after each end."""
+    """When a `@scheduled` method runs: every `fixed_rate` on a fixed schedule, or `fixed_delay` after each end."""
 
     fixed_rate: timedelta | None
     fixed_delay: timedelta | None
@@ -27,10 +27,16 @@ class ScheduledMapping:
         """The monotonic time of the first run, for a scheduler that starts at `now`."""
         return now + self.initial_delay.total_seconds()
 
-    def next_run(self, started: float, finished: float) -> float:
-        """The monotonic time of the next run after one that `started` and `finished`; never in the past."""
+    def next_run(self, due: float, finished: float) -> float:
+        """The monotonic time of the next run after the one that was `due` and `finished`.
+
+        With `fixed_rate`, the period after the time the run was due, not after its late start: the schedule stays
+        anchored to the first run, as Java's `ScheduledExecutorService.scheduleAtFixedRate` keeps it. A time already
+        past is a turn that is overdue: the scheduler runs it at once, one after the other until the schedule caught
+        up, never two runs of the same method at the same time. With `fixed_delay`, the period after the run finished.
+        """
         if self.fixed_rate is not None:
-            return max(started + self.fixed_rate.total_seconds(), finished)
+            return due + self.fixed_rate.total_seconds()
         delay = self.fixed_delay or timedelta(0)
         return finished + delay.total_seconds()
 
@@ -50,8 +56,11 @@ def scheduled(
             @scheduled(fixed_delay=timedelta(seconds=2))
             def abort_expired_games(self) -> None: ...
 
-    `fixed_rate` runs it every period from start to start, `fixed_delay` waits the period after each run ends;
-    give exactly one. `initial_delay` waits before the first run. The method takes nothing but `self`; one that
+    `fixed_rate` runs it every period on a fixed schedule from its first run, `fixed_delay` waits the period after each
+    run ends; give exactly one. A fixed rate is no promise of punctuality: when a run, or another scheduled method on
+    the one thread, takes longer than the period, the turns it delayed run back to back once the thread is free, as
+    with Spring's `ThreadPoolTaskScheduler` (a first run of 25 seconds every 10 seconds starts at 0, 25, 26, 30, ...).
+    `initial_delay` waits before the first run. The method takes nothing but `self`; one that
     raises is logged and runs again at its next turn. All scheduled methods share one thread, like Spring Boot's
     scheduler with its default pool size of one.
     """

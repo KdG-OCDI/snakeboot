@@ -1,13 +1,17 @@
 """`@transactional` runs a use case inside the installed TransactionManager, or fails loudly."""
 
-from collections.abc import Iterator
+import contextlib
+from collections.abc import Callable, Iterator
 
 import pytest
 
 from snakeboot.testing import RecordingTransactionManager
 from snakeboot.transaction import (
+    Isolation,
+    Propagation,
     TransactionManagerNotInstalledError,
     TransactionManagerRegistry,
+    UnexpectedRollbackError,
     after_commit,
     transactional,
 )
@@ -144,3 +148,119 @@ def test_failing_after_commit_callback_does_not_prevent_other_callbacks_or_mask_
     assert transaction_manager.committed == 1
     assert len(transaction_manager.callback_errors) == 1
     assert str(transaction_manager.callback_errors[0]) == "Email service crashed"
+
+
+class Ledger:
+    """Composes transactional calls the way services do: an outer one that calls inner ones and may catch."""
+
+    def __init__(self) -> None:
+        self.inner_ran_in_transaction: list[bool] = []
+
+    @transactional
+    def outer(self, inner: Callable[[], None]) -> None:
+        with contextlib.suppress(ValueError):
+            inner()
+
+    @transactional
+    def joined_failure(self) -> None:
+        raise ValueError("inner failed")
+
+    @transactional(propagation=Propagation.NESTED)
+    def nested_failure(self) -> None:
+        raise ValueError("inner failed")
+
+    @transactional(propagation=Propagation.REQUIRES_NEW)
+    def independent_failure(self) -> None:
+        raise ValueError("inner failed")
+
+    @transactional(no_rollback_for=(ValueError,))
+    def tolerated_failure(self) -> None:
+        raise ValueError("tolerated")
+
+    def calls_through_self(self) -> None:
+        self.inner()
+
+    @transactional
+    def inner(self) -> None:
+        self.inner_ran_in_transaction.append(TransactionManagerRegistry.current().in_transaction)
+
+
+def test_a_caught_failure_of_a_joined_call_rolls_the_whole_transaction_back(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    ledger = Ledger()
+
+    with pytest.raises(UnexpectedRollbackError):
+        ledger.outer(ledger.joined_failure)
+
+    assert (transaction_manager.opened, transaction_manager.committed, transaction_manager.rolled_back) == (1, 0, 1)
+
+
+def test_a_caught_failure_of_a_nested_call_lets_the_outer_transaction_commit(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    ledger = Ledger()
+
+    ledger.outer(ledger.nested_failure)
+
+    assert (transaction_manager.opened, transaction_manager.committed, transaction_manager.rolled_back) == (1, 1, 0)
+
+
+def test_a_failing_independent_call_rolls_back_alone(transaction_manager: RecordingTransactionManager) -> None:
+    ledger = Ledger()
+
+    ledger.outer(ledger.independent_failure)
+
+    assert (transaction_manager.opened, transaction_manager.committed, transaction_manager.rolled_back) == (2, 1, 1)
+
+
+def test_an_exception_named_in_no_rollback_for_does_not_mark_the_transaction(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    ledger = Ledger()
+
+    ledger.outer(ledger.tolerated_failure)
+    with pytest.raises(ValueError, match="tolerated"):
+        ledger.tolerated_failure()
+
+    assert (transaction_manager.opened, transaction_manager.committed, transaction_manager.rolled_back) == (2, 2, 0)
+
+
+def test_a_transactional_method_called_through_self_runs_in_a_transaction(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    ledger = Ledger()
+
+    ledger.calls_through_self()
+
+    assert ledger.inner_ran_in_transaction == [True]
+    assert transaction_manager.committed == 1
+
+
+def test_after_commit_inside_a_joined_call_waits_for_the_outermost_commit(
+    transaction_manager: RecordingTransactionManager,
+) -> None:
+    heard: list[str] = []
+
+    @transactional
+    def inner() -> None:
+        after_commit(lambda: heard.append("committed"))
+
+    @transactional
+    def outer() -> None:
+        inner()
+        heard.append("inner returned")
+
+    outer()
+
+    assert heard == ["inner returned", "committed"]
+
+
+def test_the_decorator_keeps_its_attributes_apart_per_method() -> None:
+    @transactional(read_only=True, isolation=Isolation.SERIALIZABLE)
+    def report() -> str:
+        """Reads only."""
+        return "report"
+
+    assert report.__name__ == "report"
+    assert report.__doc__ == "Reads only."

@@ -14,7 +14,11 @@ _COMMAND_NAME: Final = re.compile(r"[a-z][a-z0-9_-]*")
 
 
 class CommandLineRunner(ABC):
-    """A command of the application, like a `CommandLineRunner` bean in Spring Boot.
+    """A command of the application, chosen on the command line, like a Spring Shell `@Command`.
+
+    It keeps the name of Spring Boot's `CommandLineRunner`, which runs at every start: here only the command the
+    first argument names runs, and `serve` runs no other command. Initialisation at every start of the server belongs
+    in a `Lifecycle` component or a listener of `ApplicationReadyEvent`.
 
     Extend it with the name of the command, and the subclass is a component of the container: its constructor
     receives use cases, ports and sections by type, like any adapter. `python -m myapp <command> [arguments]` starts

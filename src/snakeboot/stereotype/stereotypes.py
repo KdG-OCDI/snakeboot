@@ -38,6 +38,12 @@ def component(component_class: Any = None, /, *, as_type: type[Any] | None = Non
     start when one is missing. `as_type` names the port (an abstract class or a Protocol) under which others ask for
     it, as a Spring bean is found by the interface it implements; `qualifier` tells it apart from another component
     of the same type, like `@Qualifier`. A class that does not extend the abstract class `as_type` names is refused.
+
+    Unlike Spring, extending a port registers nothing by itself: without `as_type` the class is a component of its own
+    type only, and a consumer that asks for the port stops the start.
+
+        @component(as_type=ClockPort)
+        class SystemClock(ClockPort): ...
     """
     return _declared(Stereotype.COMPONENT, component_class, as_type=as_type, qualifier=qualifier)
 

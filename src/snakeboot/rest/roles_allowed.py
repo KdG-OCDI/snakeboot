@@ -23,6 +23,11 @@ def roles_allowed[T](*roles: str) -> Callable[[T], T]:
     A caller with a valid token but none of the roles is answered with 403; `Principal.roles` holds the roles the
     `BearerAuthentication` found in the token. A public endpoint, or roles without a `BearerAuthentication` in the
     component scan, stop the start.
+
+    It protects HTTP endpoints only: the decorator marks, and the binding checks the roles when it dispatches a
+    request. Unlike Spring's method security (`@EnableMethodSecurity(jsr250Enabled = true)`), nothing checks a direct
+    call of a service, a command or a listener; so `@roles_allowed` on a class that is no `@rest_controller`, or on a
+    method that is no `@route`, stops the start instead of looking like protection.
     """
     if not roles or not all(roles):
         raise InvalidRestControllerError(f"@roles_allowed names one role or more, got {roles!r}.")

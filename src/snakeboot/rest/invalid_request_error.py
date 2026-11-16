@@ -19,15 +19,17 @@ class RequestProblem:
 class InvalidRequestError(ValueError):
     """Raised when a call does not fit its endpoint, like Spring's `MethodArgumentNotValidException`.
 
-    A missing field, a wrong type, a value the body or query parameters cannot hold: the web framework finds it
-    before the endpoint runs, and raises this in no framework's terms. An advice answers it like any error, and
-    `error_answer(error)` makes it `{"code": "invalid_request", "detail": ...}`:
+    A missing field, a wrong type, a value the body, path or query parameters cannot hold: the web framework finds
+    it before the endpoint runs, and raises this in no framework's terms. Without an advice for it the API answers
+    400 Bad Request, as Spring MVC does, with `error_answer(error)`:
+
+        {"code": "invalid_request", "detail": "body.name: Field required"}
+
+    An advice answers it like any error, with another status or body (FastAPI's own convention is 422):
 
         @exception_handler(InvalidRequestError, status=422)
         def answer_invalid_request(self, error: Exception) -> dict[str, str]:
             return error_answer(error)
-
-    Without such an advice the framework answers with 422 in its own words.
     """
 
     def __init__(self, problems: Sequence[RequestProblem]) -> None:

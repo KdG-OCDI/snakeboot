@@ -56,7 +56,7 @@ class InMemoryRegistry(EventPublicationRegistry):
 
     @override
     def store(self, event: object, listener_ids: Sequence[str]) -> list[EventPublication]:
-        self.stored_in_transaction.append(TransactionManagerRegistry.current().in_transaction)  # type: ignore[attr-defined]
+        self.stored_in_transaction.append(TransactionManagerRegistry.current().in_transaction)
         publications = [EventPublication(uuid.uuid4(), listener_id, event) for listener_id in listener_ids]
         self.owed.update({publication.identifier: publication for publication in publications})
         return publications
@@ -91,7 +91,7 @@ class Invoicing:
     @application_module_listener(OrderPlaced)
     def invoice(self, event: OrderPlaced) -> None:
         installed = TransactionManagerRegistry.is_installed()
-        self.in_transaction.append(installed and TransactionManagerRegistry.current().in_transaction)  # type: ignore[attr-defined]
+        self.in_transaction.append(installed and TransactionManagerRegistry.current().in_transaction)
         span = TraceContext.current()
         self.traces.append(span.trace_id if span is not None else None)
         if self.failing:

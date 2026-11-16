@@ -5,6 +5,7 @@ from typing import Annotated, Protocol, override
 
 import pytest
 import wireup
+from wireup.errors import WireupError
 
 from snakeboot.component_scan import ComponentScan, application_root
 from snakeboot.stereotype import (
@@ -148,3 +149,23 @@ def test_a_class_that_does_not_extend_the_port_it_names_is_refused() -> None:
 
     with pytest.raises(InvalidComponentError, match="Sundial is declared as_type=ClockPort, which it does not extend"):
         component(as_type=ClockPort)(Sundial)
+
+
+class SystemClock(ClockPort):
+    @override
+    def now(self) -> int:
+        return 7
+
+
+def test_implementing_a_port_without_as_type_provides_nobody_with_it_and_stops_the_start() -> None:
+    undeclared_port = component(SystemClock)
+
+    with pytest.raises(WireupError, match="ClockPort"):
+        wireup.create_sync_container(injectables=[undeclared_port, Shelf, CountBooksUseCase])
+
+
+def test_calling_a_bean_yourself_builds_a_new_object_while_the_container_builds_it_once() -> None:
+    built = container()
+
+    assert short_names() is not short_names()
+    assert built.get(list[str], qualifier="short") is built.get(list[str], qualifier="short")

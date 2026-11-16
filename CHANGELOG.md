@@ -11,6 +11,50 @@ a minor release may break the API: pin `snakeboot>=0.15,<0.16`.
 - Fixed: a test run ended with lines such as `INFO ...OneThreadAtATimePool: Pool recreating`. Since 0.15.0 the
   applications the tests kept closed after pytest stopped capturing; they now close with the last test, inside it.
 
+What follows brings snakeboot's defaults in line with Spring where a student would otherwise learn the wrong thing.
+
+- **Breaking:** a `@transactional` call inside a running transaction joins it, like Spring's default
+  `Propagation.REQUIRED`, instead of opening a savepoint (#18). An exception that leaves a joined call marks the whole
+  transaction rollback-only, also when a caller catches it; the outermost call then rolls back and raises
+  `UnexpectedRollbackError`. `@transactional(propagation=Propagation.NESTED)` keeps the savepoint of before;
+  `Propagation.REQUIRES_NEW` runs an independent transaction on a connection of its own (PostgreSQL; SQLite refuses
+  it with `IllegalTransactionStateError`). `Database.transaction(definition)` and `TransactionManager.atomic(definition)`
+  take a `TransactionDefinition`.
+- `@transactional(no_rollback_for=..., read_only=True, isolation=Isolation.X)` (#36): an exception named in
+  `no_rollback_for` commits, then reaches the caller; a read-only transaction refuses to write a changed entity
+  (`ReadOnlyTransactionError`), and PostgreSQL refuses any write; an isolation applies to a transaction the call
+  starts, and a joined call that asks one is refused. Every other exception rolls back, as before. No `timeout`.
+- **Breaking:** a `@transactional_event_listener` hears only an event published while a transaction runs, as in
+  Spring (#22): outside one it is skipped, also without a database, unless it says `fallback_execution=True`. Before,
+  it ran at once, or raised `TransactionManagerNotInstalledError` without a database.
+- `@transactional_event_listener(..., phase=TransactionPhase.X)`: `BEFORE_COMMIT`, `AFTER_COMMIT` (the default),
+  `AFTER_ROLLBACK` and `AFTER_COMPLETION`, like Spring's `TransactionPhase` (#35). `TransactionManager` gains
+  `in_transaction` and `register(phase, callback)`; a manager of an application's own implements them.
+- **Breaking:** the audit fields are filled when an entity is written (the flush), not in `save` (#21): a change a
+  transaction makes to an entity it loaded is audited without `save`, with the principal and the moment of the flush,
+  and an entity that did not change keeps its audit fields and version. Use the entity `save` returns: the one passed
+  in is not changed when the session copies it.
+- **Breaking:** `save_all` is atomic, like Spring Data JPA's `saveAll` (#19): without a running transaction, all of
+  the entities or none; inside one, its failure marks it rollback-only.
+- `save_and_flush`, `save_all_and_flush` and `flush()` on every repository, like `JpaRepository` (#34). `save` still
+  writes at once, unlike Spring Data JPA's; a flush is never a commit. `RepositoryOperations` gains `save_all` and
+  `flush`.
+- **Breaking:** without an advice for `InvalidRequestError`, a call that does not fit its endpoint is answered 400
+  `{"code": "invalid_request", "detail": ...}`, as Spring MVC answers, instead of FastAPI's 422 in FastAPI's words
+  (#31). The OpenAPI document says the status the API answers. An advice still chooses another.
+- **Breaking:** `@roles_allowed` on a class that is no `@rest_controller`, or on a method that is no `@route`, stops
+  the start: nothing would check it (#24).
+- **Breaking:** a listener method on a class that is no `@application_event_listener`, or one that declares a return
+  type, stops the start (#28): nobody would register it, and nobody publishes what it returns.
+- **Breaking:** a `fixed_rate` keeps to the schedule of its first run, as Spring's `ThreadPoolTaskScheduler` does
+  (#33): turns a long run delayed run back to back, instead of the schedule shifting. `ScheduledMapping.next_run`
+  takes the time the run was due.
+- Fixed: the comment that called after-commit callbacks Spring's `TransactionSynchronization.afterCommit`; their
+  failures are logged and do not reach the caller, now documented as snakeboot's choice (#23).
+- The README explains where snakeboot differs from Spring on purpose: `@transactional` on a call through `self` (#20),
+  what `@application_test` replaces and what such a test does not show (#25), `as_type` (#26), calling a `@bean`
+  yourself (#27), `@query` as native SQL (#29), the configuration (#30) and `CommandLineRunner` (#32).
+
 ## 0.15.0
 
 - Tests that ask the same application share one start of it, like Spring's test context cache (#17). The pytest
