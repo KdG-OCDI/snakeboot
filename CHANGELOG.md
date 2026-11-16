@@ -1,9 +1,9 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.15,<0.16`.
+a minor release may break the API: pin `snakeboot>=0.16,<0.17`.
 
-## Unreleased
+## 0.16.0
 
 - `serve` and `run_lifecycle` print snakeboot's banner, with its version, where the log lines go, like Spring Boot's
   banner. `[server] banner = false` leaves it out, like `spring.main.banner-mode=off`; so does

@@ -31,24 +31,25 @@ class Column:
 
 @dataclass(frozen=True, slots=True)
 class CreatedDate:
-    """Marks a `datetime | None` that `save` fills when the entity is first saved, like Spring Data's `@CreatedDate`."""
+    """Marks a `datetime | None` filled when the entity is first written, like Spring Data's `@CreatedDate`."""
 
 
 @dataclass(frozen=True, slots=True)
 class LastModifiedDate:
-    """Marks a `datetime | None` that every `save` fills, like Spring Data's `@LastModifiedDate`."""
+    """Marks a `datetime | None` filled at every write of a changed entity (the flush), like Spring Data's
+    `@LastModifiedDate`; an entity that did not change keeps it."""
 
 
 @dataclass(frozen=True, slots=True)
 class CreatedBy:
-    """Marks a `str | None` that `save` fills, when the entity is first saved, with the name of the signed-in
+    """Marks a `str | None` filled, when the entity is first written, with the name of the signed-in
     principal, like Spring Data's `@CreatedBy`; without one it stays empty."""
 
 
 @dataclass(frozen=True, slots=True)
 class LastModifiedBy:
-    """Marks a `str | None` that every `save` fills with the name of the signed-in principal, or empties without
-    one, like Spring Data's `@LastModifiedBy`."""
+    """Marks a `str | None` filled at every write of a changed entity (the flush) with the name of the principal
+    signed in on the flushing thread, or emptied without one, like Spring Data's `@LastModifiedBy`."""
 
 
 @dataclass(frozen=True, slots=True)
