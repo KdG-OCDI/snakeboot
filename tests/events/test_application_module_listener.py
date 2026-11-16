@@ -247,14 +247,47 @@ def test_the_listener_continues_the_trace_of_the_publisher(
     assert invoicing.traces == [span.trace_id]
 
 
-def test_without_a_database_the_event_is_handed_over_at_once_and_kept_nowhere(executor: LaterExecutor) -> None:
+def test_without_a_database_the_event_reaches_no_module_listener(executor: LaterExecutor) -> None:
     invoicing = Invoicing()
     publisher = ApplicationEventPublisher([invoicing], executor=executor)
 
     publisher.publish(OrderPlaced("o1"))
     executor.run_all()
 
-    assert (invoicing.invoiced, invoicing.in_transaction) == (["o1"], [False])
+    assert invoicing.invoiced == []
+    assert publisher.resubmit_incomplete() == 0
+
+
+def test_outside_a_transaction_the_event_reaches_no_module_listener_and_is_stored_nowhere(
+    transactions: RecordingTransactionManager, executor: LaterExecutor
+) -> None:
+    invoicing, registry = Invoicing(), InMemoryRegistry()
+    publisher = ApplicationEventPublisher([invoicing], executor=executor, registry=registry)
+
+    publisher.publish(OrderPlaced("o1"))
+    executor.run_all()
+
+    assert (invoicing.invoiced, registry.owed) == ([], {})
+
+
+class FallbackInvoicing:
+    def __init__(self) -> None:
+        self.invoiced: list[str] = []
+
+    @application_module_listener(OrderPlaced, fallback_execution=True)
+    def invoice(self, event: OrderPlaced) -> None:
+        self.invoiced.append(event.order_id)
+
+
+def test_a_fallback_module_listener_is_handed_the_event_at_once_and_kept_nowhere(executor: LaterExecutor) -> None:
+    invoicing = FallbackInvoicing()
+    publisher = ApplicationEventPublisher([invoicing], executor=executor)
+
+    publisher.publish(OrderPlaced("o1"))
+    assert invoicing.invoiced == []
+    executor.run_all()
+
+    assert invoicing.invoiced == ["o1"]
     assert publisher.resubmit_incomplete() == 0
 
 

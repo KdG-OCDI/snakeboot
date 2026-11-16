@@ -512,7 +512,7 @@ the commit, on a thread of its own, in a transaction of its own, so one module r
 down or rolling it back. With `[database]` the publisher's transaction also writes the publication into
 `snakeboot_event_publication`, the transactional outbox, and the listener's transaction deletes it. A publication whose
 listener failed, or whose process stopped first, is delivered again (after 30 seconds, then longer, ten times at most),
-so the event arrives at least once and the listener must bear receiving it twice. What keeps failing waits in the
+so the event arrives at least once and the listener must bear receiving it twice. Like a `@transactional_event_listener`, and Spring Modulith's listener, it hears only an event published while a transaction runs: outside one, and so in an application without a database, it is skipped, unless it says `fallback_execution=True`, which hands the event over at once, kept in no registry. What keeps failing waits in the
 table, with its last failure, for a person; the gauge `snakeboot_event_publications_incomplete` shows how many wait.
 The event is kept as JSON, so it is a dataclass or a Pydantic model; another type stops the start. The table belongs
 to the schema once the application has an `@application_module_listener`, as Spring Modulith's `event_publication`

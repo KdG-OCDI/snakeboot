@@ -1,5 +1,5 @@
 import logging
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass
 from functools import partial
@@ -35,7 +35,8 @@ class ApplicationEventPublisher:
     An `@event_listener` receives the event at once, a `@transactional_event_listener` in its phase of the running
     transaction (after the commit by default), and is skipped without one unless it asked for `fallback_execution`.
     An `@application_module_listener` receives it after the commit on the `executor`, in a transaction of its
-    own and in the trace of the publisher; with a `registry`, the publisher's transaction stores the publication,
+    own and in the trace of the publisher, and is skipped without a running transaction unless it asked for
+    `fallback_execution`; with a `registry`, the publisher's transaction stores the publication,
     the listener's transaction completes it, and `resubmit_incomplete` delivers the ones that failed or were lost.
 
     It keeps its listeners in an `ApplicationEventListenerRegistry`, which `register` fills. The library registers
@@ -76,7 +77,8 @@ class ApplicationEventPublisher:
     def publish(self, event: object) -> None:
         """Delivers `event` to every listener method for its type: at once, after the commit, or on its own."""
         methods = self._listeners.receiving(event)
-        publications = self._stored(event, methods)
+        in_transaction = _transaction_runs()
+        publications = self._stored(event, methods) if in_transaction else {}
         for method in methods:
             match method.mapping.delivery:
                 case Delivery.IN_TRANSACTION:
@@ -84,8 +86,9 @@ class ApplicationEventPublisher:
                 case Delivery.TRANSACTION_PHASE:
                     _in_its_phase(method, event)
                 case Delivery.ASYNC_AFTER_COMMIT:
-                    publication, trace = publications.get(method.name), TraceContext.current()
-                    _after_commit_or_now(partial(self._hand_over, _Delivery(method, event, publication, trace)))
+                    self._hand_over_after_commit(
+                        method, event, publication=publications.get(method.name), in_transaction=in_transaction
+                    )
 
     def publish_all(self, events: Iterable[object]) -> None:
         """Publishes `events` in the order they happened."""
@@ -115,6 +118,19 @@ class ApplicationEventPublisher:
         if self._registry is None or not owed:
             return {}
         return {publication.listener_id: publication for publication in self._registry.store(event, owed)}
+
+    def _hand_over_after_commit(
+        self, method: ListenerMethod, event: object, *, publication: EventPublication | None, in_transaction: bool
+    ) -> None:
+        # Like Spring Modulith, whose @ApplicationModuleListener is a @TransactionalEventListener: bound to the running
+        # transaction, or skipped; fallback_execution hands it over at once instead, kept in no registry.
+        delivery = _Delivery(method, event, publication, TraceContext.current())
+        if in_transaction:
+            after_commit(partial(self._hand_over, delivery))
+        elif method.mapping.fallback_execution:
+            self._hand_over(delivery)
+        else:
+            logger.debug("No transaction runs, so %s skips %s", method.name, type(event).__qualname__)
 
     def _hand_over(self, delivery: _Delivery) -> None:
         self._executor.execute(partial(self._deliver, delivery))
@@ -155,14 +171,6 @@ def _in_its_phase(method: ListenerMethod, event: object) -> None:
 
 def _transaction_runs() -> bool:
     return TransactionManagerRegistry.is_installed() and TransactionManagerRegistry.current().in_transaction
-
-
-def _after_commit_or_now(callback: Callable[[], None]) -> None:
-    # An application without a database has no transaction to wait for.
-    if TransactionManagerRegistry.is_installed():
-        after_commit(callback)
-    else:
-        callback()
 
 
 def _own_transaction() -> AbstractContextManager[object]:

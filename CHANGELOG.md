@@ -1,7 +1,14 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.16,<0.17`.
+a minor release may break the API: pin `snakeboot>=0.17,<0.18`.
+
+## 0.17.0
+
+- **Breaking:** an `@application_module_listener` hears only an event published while a transaction runs, like Spring
+  Modulith's `@ApplicationModuleListener`, which is a `@TransactionalEventListener` (#38). Published outside one, and
+  so in an application without a database, the event is skipped and stored nowhere; before, it was handed over at
+  once. `@application_module_listener(..., fallback_execution=True)` hands it over at once, kept in no registry.
 
 ## 0.16.0
 

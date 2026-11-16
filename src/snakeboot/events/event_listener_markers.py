@@ -78,7 +78,7 @@ def transactional_event_listener(
     return _mark(event_types, Delivery.TRANSACTION_PHASE, phase=phase, fallback_execution=fallback_execution)
 
 
-def application_module_listener(*event_types: type) -> MethodMarker:
+def application_module_listener(*event_types: type, fallback_execution: bool = False) -> MethodMarker:
     """Marks a method that receives `event_types` after the commit, on a thread and in a transaction of its own.
 
     Spring Modulith's `@ApplicationModuleListener`: `@Async`, `@Transactional(propagation = REQUIRES_NEW)` and
@@ -94,8 +94,13 @@ def application_module_listener(*event_types: type) -> MethodMarker:
             def create_invoice(self, event: OrderPlaced) -> None: ...
 
     The event is kept as JSON: a dataclass or a Pydantic model whose fields JSON can hold.
+
+    Like a `@transactional_event_listener`, and Spring Modulith's listener, it hears only an event published while a
+    transaction runs: published outside one (no `@transactional` around it, or in an application without a database)
+    it is skipped. `fallback_execution=True` hands such an event over at once instead, on the executor, kept in no
+    registry, so it is not delivered again when the listener fails.
     """
-    return _mark(event_types, Delivery.ASYNC_AFTER_COMMIT)
+    return _mark(event_types, Delivery.ASYNC_AFTER_COMMIT, fallback_execution=fallback_execution)
 
 
 def _mark(
