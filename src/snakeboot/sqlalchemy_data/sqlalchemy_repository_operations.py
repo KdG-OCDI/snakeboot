@@ -1,4 +1,4 @@
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from datetime import date, datetime
 from decimal import Decimal
 from typing import Any, Final, override
@@ -62,6 +62,15 @@ class SqlAlchemyRepositoryOperations(RepositoryOperations):
             saved = session.merge(entity)
             session.flush()
             return saved
+
+    @override
+    def save_all(self, entities: Iterable[Any]) -> list[Any]:
+        with self._database.session():
+            return [self.save(entity) for entity in entities]
+
+    @override
+    def flush(self) -> None:
+        self._database.flush()
 
     @override
     def delete(self, entity: Any) -> None:

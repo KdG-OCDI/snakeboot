@@ -82,8 +82,7 @@ def test_a_file_whose_part_names_no_type_is_octet_stream(client: TestClient) -> 
 def test_a_call_without_the_file_is_an_invalid_request(client: TestClient) -> None:
     response = client.post("/api/folders/minutes/documents", data={"title": "Board"})
 
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"] == ["body", "document"]
+    assert (response.status_code, response.json()["detail"]) == (400, "body.document: Field required")
 
 
 def test_a_file_larger_than_max_upload_size_is_answered_by_the_advice() -> None:

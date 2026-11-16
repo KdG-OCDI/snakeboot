@@ -132,9 +132,8 @@ class TaskScheduler(Lifecycle, component=False):
         heapq.heapify(turns)
         while not self._stopping.wait(max(0.0, turns[0].due - time.monotonic())):
             turn = heapq.heappop(turns)
-            started = time.monotonic()
             _run_logging_failures(turn.task)
-            turn.due = turn.task.mapping.next_run(started, time.monotonic())
+            turn.due = turn.task.mapping.next_run(turn.due, time.monotonic())
             heapq.heappush(turns, turn)
 
 

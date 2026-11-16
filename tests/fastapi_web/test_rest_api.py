@@ -91,7 +91,7 @@ def test_the_tags_are_those_of_the_controllers(container: wireup.SyncContainer) 
 def test_the_return_annotation_describes_the_answer(container: wireup.SyncContainer) -> None:
     responses = schema_of(GreetingApplication, container)["paths"]["/api/greetings"]["post"]["responses"]
 
-    assert list(responses) == ["201", "422"]
+    assert list(responses) == ["201", "422"], "the advice of GreetingApplication answers an invalid request with 422"
     assert responses["201"]["content"]["application/json"]["schema"]["type"] == "object"
 
 
@@ -122,11 +122,23 @@ def test_a_call_that_does_not_fit_is_an_invalid_request_the_advice_answers(clien
     assert response.json() == {"code": "invalid_request", "detail": "body.name: Field required"}
 
 
-def test_without_an_advice_for_it_an_invalid_request_is_fastapi_s_422() -> None:
-    response = TestClient(rest_api(UnadvisedApplication, lambda _: EchoRestController())).post("/api/echo", json={})
+def test_without_an_advice_for_it_an_invalid_request_is_a_bad_request_in_snakeboot_s_words() -> None:
+    client = TestClient(rest_api(UnadvisedApplication, lambda _: EchoRestController()))
 
-    assert response.status_code == 422
-    assert response.json()["detail"][0]["loc"] == ["body", "text"]
+    body = client.post("/api/echo", json={})
+    malformed = client.post("/api/echo", content=b"{not json", headers={"Content-Type": "application/json"})
+
+    assert (body.status_code, body.json()) == (400, {"code": "invalid_request", "detail": "body.text: Field required"})
+    assert (malformed.status_code, malformed.json()["code"]) == (400, "invalid_request")
+
+
+def test_without_an_advice_the_openapi_document_says_400_with_snakeboot_s_error_answer() -> None:
+    api = rest_api(UnadvisedApplication, lambda _: EchoRestController())
+
+    responses = api.openapi()["paths"]["/api/echo"]["post"]["responses"]
+
+    assert "422" not in responses
+    assert responses["400"]["content"]["application/json"]["schema"]["required"] == ["code", "detail"]
 
 
 def test_fastapi_s_validation_error_becomes_one_request_problem_per_error() -> None:

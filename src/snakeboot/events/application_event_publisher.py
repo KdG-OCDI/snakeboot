@@ -32,7 +32,8 @@ class ApplicationEventPublisher:
     in-process, in a stable order (by listener name). A listener for a base class (`WorkshopEvent`)
     receives every subclass.
 
-    An `@event_listener` receives the event at once, a `@transactional_event_listener` after the commit.
+    An `@event_listener` receives the event at once, a `@transactional_event_listener` in its phase of the running
+    transaction (after the commit by default), and is skipped without one unless it asked for `fallback_execution`.
     An `@application_module_listener` receives it after the commit on the `executor`, in a transaction of its
     own and in the trace of the publisher; with a `registry`, the publisher's transaction stores the publication,
     the listener's transaction completes it, and `resubmit_incomplete` delivers the ones that failed or were lost.
@@ -80,8 +81,8 @@ class ApplicationEventPublisher:
             match method.mapping.delivery:
                 case Delivery.IN_TRANSACTION:
                     method.receive(event)
-                case Delivery.AFTER_COMMIT:
-                    after_commit(partial(method.receive, event))
+                case Delivery.TRANSACTION_PHASE:
+                    _in_its_phase(method, event)
                 case Delivery.ASYNC_AFTER_COMMIT:
                     publication, trace = publications.get(method.name), TraceContext.current()
                     _after_commit_or_now(partial(self._hand_over, _Delivery(method, event, publication, trace)))
@@ -140,6 +141,20 @@ class ApplicationEventPublisher:
             self._registry.fail(publication, error)
         except Exception:
             logger.exception("The failure of publication %s could not be recorded", publication.identifier)
+
+
+def _in_its_phase(method: ListenerMethod, event: object) -> None:
+    # Like Spring's TransactionalApplicationListenerMethodAdapter: bound to the running transaction, or skipped.
+    if _transaction_runs():
+        TransactionManagerRegistry.current().register(method.mapping.phase, partial(method.receive, event))
+    elif method.mapping.fallback_execution:
+        method.receive(event)
+    else:
+        logger.debug("No transaction runs, so %s skips %s", method.name, type(event).__qualname__)
+
+
+def _transaction_runs() -> bool:
+    return TransactionManagerRegistry.is_installed() and TransactionManagerRegistry.current().in_transaction
 
 
 def _after_commit_or_now(callback: Callable[[], None]) -> None:

@@ -105,9 +105,9 @@ def test_the_signed_in_principal_creates_and_modifies(workshops: WorkshopRecords
 
     with SecurityContext.signed_in(Principal("max")):
         saved.title = "Clean Architecture"
-        workshops.save(saved)
+        updated = workshops.save(saved)
 
-    assert (saved.created_by, saved.modified_by) == ("olivia", "max")
+    assert (updated.created_by, updated.modified_by) == ("olivia", "max")
 
 
 def test_work_nobody_signed_in_to_leaves_the_auditors_empty(workshops: WorkshopRecords) -> None:
@@ -115,9 +115,74 @@ def test_work_nobody_signed_in_to_leaves_the_auditors_empty(workshops: WorkshopR
         saved = workshops.save(WorkshopRecord("w1", "Clean Code"))
 
     saved.title = "Changed by a scheduled job"
-    workshops.save(saved)
+    updated = workshops.save(saved)
 
-    assert (saved.created_by, saved.modified_by) == ("olivia", None)
+    assert (updated.created_by, updated.modified_by) == ("olivia", None)
+
+
+def test_a_change_the_transaction_writes_without_save_is_audited_with_its_version(
+    database: Database, workshops: WorkshopRecords
+) -> None:
+    with SecurityContext.signed_in(Principal("alice")):
+        workshops.save(WorkshopRecord("w1", "Clean Code"))
+
+    with SecurityContext.signed_in(Principal("bob")), database.transaction():
+        mine = workshops.find_by_id("w1")
+        assert mine is not None
+        mine.title = "Changed by Bob"
+
+    found = workshops.find_by_id("w1")
+    assert found is not None
+    assert (found.title, found.version, found.created_by, found.modified_by) == ("Changed by Bob", 2, "alice", "bob")
+
+
+def test_a_change_flushed_by_a_later_query_is_audited_too(database: Database, workshops: WorkshopRecords) -> None:
+    workshops.save(WorkshopRecord("w1", "Clean Code"))
+
+    with SecurityContext.signed_in(Principal("bob")), database.transaction():
+        mine = workshops.find_by_id("w1")
+        assert mine is not None
+        mine.title = "Changed"
+        workshops.find_by_title("Changed")
+        flushed_by = mine.modified_by
+
+    assert flushed_by == "bob"
+
+
+def test_a_transaction_that_only_reads_leaves_the_audit_fields_and_version_alone(
+    database: Database, workshops: WorkshopRecords
+) -> None:
+    with SecurityContext.signed_in(Principal("alice")):
+        workshops.save(WorkshopRecord("w1", "Clean Code"))
+
+    with SecurityContext.signed_in(Principal("bob")), database.transaction():
+        workshops.find_by_id("w1")
+
+    found = workshops.find_by_id("w1")
+    assert found is not None
+    assert (found.version, found.modified_by) == (1, "alice")
+
+
+def test_a_rolled_back_change_leaves_neither_data_nor_audit_fields(
+    database: Database, workshops: WorkshopRecords
+) -> None:
+    with SecurityContext.signed_in(Principal("alice")):
+        workshops.save(WorkshopRecord("w1", "Clean Code"))
+
+    def change_then_fail() -> None:
+        with database.transaction():
+            mine = workshops.find_by_id("w1")
+            assert mine is not None
+            mine.title = "Changed"
+            workshops.flush()
+            raise RuntimeError
+
+    with SecurityContext.signed_in(Principal("bob")), pytest.raises(RuntimeError):
+        change_then_fail()
+
+    found = workshops.find_by_id("w1")
+    assert found is not None
+    assert (found.title, found.modified_by) == ("Clean Code", "alice")
 
 
 def test_skip_locked_reads_like_a_plain_query_where_nothing_is_locked(workshops: WorkshopRecords) -> None:

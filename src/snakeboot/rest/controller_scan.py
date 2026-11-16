@@ -21,6 +21,11 @@ from snakeboot.rest.rest_controller_mappings import (
 )
 from snakeboot.rest.roles_allowed import ROLES_ATTRIBUTE, roles_of
 
+_UNCHECKED: Final = (
+    "when the binding dispatches an HTTP request. Nobody checks the roles of a direct call of a service, a command or "
+    "a listener: check `SecurityContext.current()` there yourself."
+)
+
 _METHODS_WITH_A_BODY: Final = frozenset({"POST", "PUT", "PATCH"})
 """The HTTP methods whose calls carry a body, and so may upload a file."""
 
@@ -73,6 +78,7 @@ class ControllerScan:
         controllers = self._component_scan.classes_marked(CONTROLLER_MAPPING_ATTRIBUTE)
         advices = self._component_scan.classes_marked(ADVICE_MARKER_ATTRIBUTE)
         endpoints = [endpoint for controller in controllers for endpoint in self._endpoints_of(controller)]
+        self._refuse_roles_on_what_is_no_endpoint(controllers)
         authentication = self._authentication()
         _refuse_ambiguous_routes(endpoints)
         _refuse_principals_nobody_supplies(endpoints, authenticated=authentication is not None)
@@ -99,6 +105,22 @@ class ControllerScan:
         if not endpoints:
             raise InvalidRestControllerError(f"{controller_class.__name__} has no @route methods.")
         return endpoints
+
+    def _refuse_roles_on_what_is_no_endpoint(self, controllers: Sequence[type]) -> None:
+        # @roles_allowed only marks; the binding checks the roles when it dispatches a request to an endpoint. On any
+        # other class or method nobody would check them, and an unchecked declaration must not look like protection.
+        for marked_class in self._component_scan.classes_marked(ROLES_ATTRIBUTE):
+            if marked_class not in controllers:
+                raise InvalidRestControllerError(
+                    f"{marked_class.__module__}.{marked_class.__qualname__} names roles, but is no @rest_controller: "
+                    f"@roles_allowed protects the endpoints of a controller only, {_UNCHECKED}"
+                )
+        for marked in self._component_scan.methods_marked(ROLES_ATTRIBUTE, frozenset):
+            if marked.owner not in controllers or not hasattr(marked.method, ROUTE_MAPPING_ATTRIBUTE):
+                raise InvalidRestControllerError(
+                    f"{marked.name} names roles, but is no endpoint: @roles_allowed protects the @route methods of a "
+                    f"@rest_controller only, {_UNCHECKED}"
+                )
 
     def _error_handlers_of(self, advice_class: type) -> list[DeclaredErrorHandler]:
         handlers = [

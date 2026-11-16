@@ -1,5 +1,5 @@
 from abc import ABC, abstractmethod
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any
@@ -67,6 +67,14 @@ class RepositoryOperations(ABC):
     @abstractmethod
     def save(self, entity: Any) -> Any:
         """Inserts `entity`, or updates the row with its identifier, and returns the saved entity."""
+
+    @abstractmethod
+    def save_all(self, entities: Iterable[Any]) -> list[Any]:
+        """Saves every entity in order in one transaction: it joins the running one, or commits all or none."""
+
+    @abstractmethod
+    def flush(self) -> None:
+        """Writes the pending changes of the running transaction to the database; outside a transaction, nothing."""
 
     @abstractmethod
     def delete(self, entity: Any) -> None:

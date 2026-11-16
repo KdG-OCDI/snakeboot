@@ -3,6 +3,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from typing import Any, Final
 
+from snakeboot.transaction import TransactionPhase
+
 LISTENER_MAPPING_ATTRIBUTE: Final = "__application_event_listener_mapping__"
 
 APPLICATION_MODULE_LISTENER_ATTRIBUTE: Final = "__application_module_listener_mapping__"
@@ -17,8 +19,9 @@ class Delivery(StrEnum):
 
     IN_TRANSACTION = "in_transaction"
     """At once, on the publisher's thread, inside its transaction (`@event_listener`)."""
-    AFTER_COMMIT = "after_commit"
-    """Once the publisher's transaction committed, on its thread (`@transactional_event_listener`)."""
+    TRANSACTION_PHASE = "transaction_phase"
+    """In a phase of the publisher's transaction, after the commit by default, on its thread
+    (`@transactional_event_listener`)."""
     ASYNC_AFTER_COMMIT = "async_after_commit"
     """Once the publisher's transaction committed, on a thread of its own, in a transaction of its own; kept in the
     event publication registry until it succeeds (`@application_module_listener`)."""
@@ -26,10 +29,16 @@ class Delivery(StrEnum):
 
 @dataclass(frozen=True, slots=True)
 class ListenerMapping:
-    """What a listener marker records on a method: the events it receives and when."""
+    """What a listener marker records on a method: the events it receives and when.
+
+    `phase` and `fallback_execution` belong to a `@transactional_event_listener`: the phase of the publisher's
+    transaction it waits for, and whether it receives an event published outside a transaction.
+    """
 
     event_types: tuple[type, ...]
     delivery: Delivery
+    phase: TransactionPhase = TransactionPhase.AFTER_COMMIT
+    fallback_execution: bool = False
 
 
 def event_listener(*event_types: type) -> MethodMarker:
@@ -40,16 +49,33 @@ def event_listener(*event_types: type) -> MethodMarker:
     return _mark(event_types, Delivery.IN_TRANSACTION)
 
 
-def transactional_event_listener(*event_types: type) -> MethodMarker:
-    """Marks a method that receives `event_types` once the transaction has committed.
+def transactional_event_listener(
+    *event_types: type, phase: TransactionPhase = TransactionPhase.AFTER_COMMIT, fallback_execution: bool = False
+) -> MethodMarker:
+    """Marks a method that receives `event_types` in a phase of the transaction they were published in.
 
-    Spring: `@TransactionalEventListener(phase = AFTER_COMMIT)`. Use it for effects outside the
-    database, such as notifications: they are delivered through `after_commit`, so a rolled-back
-    change never reaches anyone, and a failing listener cannot undo the committed change. A listener
-    that fails, or a process that stops before it ran, loses the event: for what must arrive, use
-    `@application_module_listener`.
+    Spring: `@TransactionalEventListener(phase = ..., fallbackExecution = ...)`. By default the phase is
+    `AFTER_COMMIT`: use it for effects outside the database, such as notifications, so a rolled-back change never
+    reaches anyone, and a failing listener cannot undo the committed change. `BEFORE_COMMIT` runs inside the
+    transaction (its writes commit with it, its failure rolls it back); `AFTER_ROLLBACK` only when the transaction
+    rolled back; `AFTER_COMPLETION` either way. After the end a failing listener is logged, and its error does not
+    reach the publisher. A listener that fails after the commit, or a process that stops before it ran, loses the
+    event: for what must arrive, use `@application_module_listener`.
+
+    The event must be published while a transaction runs: one that ended before, as a repository's own transaction
+    does, does not count. Without a running transaction the listener is skipped, as in Spring, also in an
+    application without a database; `fallback_execution=True` delivers the event at once instead. It never starts a
+    transaction, and never delivers after a rollback but in `AFTER_ROLLBACK` or `AFTER_COMPLETION`.
+
+        @application_event_listener
+        class MailOnOrderPlaced:
+            @transactional_event_listener(OrderPlaced)
+            def send_confirmation(self, event: OrderPlaced) -> None: ...
+
+            @transactional_event_listener(OrderPlaced, phase=TransactionPhase.AFTER_ROLLBACK)
+            def report_failure(self, event: OrderPlaced) -> None: ...
     """
-    return _mark(event_types, Delivery.AFTER_COMMIT)
+    return _mark(event_types, Delivery.TRANSACTION_PHASE, phase=phase, fallback_execution=fallback_execution)
 
 
 def application_module_listener(*event_types: type) -> MethodMarker:
@@ -72,9 +98,15 @@ def application_module_listener(*event_types: type) -> MethodMarker:
     return _mark(event_types, Delivery.ASYNC_AFTER_COMMIT)
 
 
-def _mark(event_types: tuple[type, ...], delivery: Delivery) -> MethodMarker:
+def _mark(
+    event_types: tuple[type, ...],
+    delivery: Delivery,
+    *,
+    phase: TransactionPhase = TransactionPhase.AFTER_COMMIT,
+    fallback_execution: bool = False,
+) -> MethodMarker:
     def record(method: Callable[..., Any]) -> Callable[..., Any]:
-        mapping = ListenerMapping(event_types, delivery)
+        mapping = ListenerMapping(event_types, delivery, phase, fallback_execution)
         setattr(method, LISTENER_MAPPING_ATTRIBUTE, mapping)
         if delivery is Delivery.ASYNC_AFTER_COMMIT:
             setattr(method, APPLICATION_MODULE_LISTENER_ATTRIBUTE, mapping)

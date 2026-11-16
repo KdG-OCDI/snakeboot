@@ -43,6 +43,18 @@ A page that downloads a file with `fetch` (to send its bearer token) reads the f
 CONTENT_TOO_LARGE: Final = 413
 """The status of an upload larger than the server takes, without an advice for it (RFC 9110's Content Too Large)."""
 
+BAD_REQUEST: Final = 400
+"""The status of a call that does not fit its endpoint, without an advice for it, as Spring MVC answers a failed
+`@Valid @RequestBody`; FastAPI's own would be 422."""
+
+_FRAMEWORK_S_VALIDATION_STATUS: Final = "422"
+
+_ERROR_ANSWER_SCHEMA: Final = {
+    "type": "object",
+    "properties": {"code": {"type": "string"}, "detail": {"type": "string"}},
+    "required": ["code", "detail"],
+}
+
 
 def rest_api(
     application: type,
@@ -113,6 +125,7 @@ def add_routes(api: FastAPI, scanned: ScannedControllers, endpoint_factory: Fast
             answers[error_type] = answer
             api.add_exception_handler(error_type, answer)
     _answer_invalid_requests(api, answers)
+    _document_invalid_requests(api, _invalid_request_status(scanned))
     _answer_uploads_too_large(api, answers)
 
 
@@ -129,17 +142,51 @@ def invalid_request_of(error: RequestValidationError) -> InvalidRequestError:
 def _answer_invalid_requests(api: FastAPI, answers: Mapping[type[Exception], ErrorAnswer]) -> None:
     # FastAPI finds a call that does not fit before the endpoint runs, and raises its own RequestValidationError. The
     # advice that answers InvalidRequestError, or the nearest base of it, answers that too, in snakeboot's terms;
-    # without one, FastAPI's own 422 stays.
-    answer = next((answers[base] for base in InvalidRequestError.__mro__ if base in answers), None)
-    if answer is None:
-        return
+    # without one, the API answers 400 with `error_answer`, as Spring MVC answers 400, instead of FastAPI's 422 in
+    # FastAPI's words.
+    advised = next((answers[base] for base in InvalidRequestError.__mro__ if base in answers), None)
 
     def answer_in_snakeboot_s_terms(request: Request, error: Exception) -> Response:
         if not isinstance(error, RequestValidationError):
             raise TypeError(f"Expected FastAPI's RequestValidationError, got {error!r}.")
-        return answer(request, invalid_request_of(error))
+        invalid = invalid_request_of(error)
+        if advised is None:
+            return JSONResponse(error_answer(invalid), status_code=BAD_REQUEST)
+        return advised(request, invalid)
 
     api.add_exception_handler(RequestValidationError, answer_in_snakeboot_s_terms)
+
+
+def _invalid_request_status(scanned: ScannedControllers) -> int:
+    for base in InvalidRequestError.__mro__:
+        for handler in scanned.error_handlers:
+            if base in handler.mapping.error_types:
+                return handler.mapping.status
+    return BAD_REQUEST
+
+
+def _document_invalid_requests(api: FastAPI, status: int) -> None:
+    # FastAPI documents its own 422 on every endpoint that reads input; the OpenAPI document says what the API answers.
+    generate = api.openapi
+
+    def openapi() -> dict[str, Any]:
+        if api.openapi_schema is not None:
+            return api.openapi_schema
+        schema = generate()
+        for operations in schema.get("paths", {}).values():
+            for operation in operations.values():
+                responses = operation.get("responses", {})
+                if responses.pop(_FRAMEWORK_S_VALIDATION_STATUS, None) is not None:
+                    responses[str(status)] = _invalid_request_response(advised=status != BAD_REQUEST)
+        return schema
+
+    api.openapi = openapi  # type: ignore[method-assign]  # reason: FastAPI's documented way to customise the document
+
+
+def _invalid_request_response(*, advised: bool) -> dict[str, Any]:
+    if advised:
+        return {"description": "Invalid Request, answered by the application's advice"}
+    return {"description": "Invalid Request", "content": {"application/json": {"schema": _ERROR_ANSWER_SCHEMA}}}
 
 
 def _answer_uploads_too_large(api: FastAPI, answers: Mapping[type[Exception], ErrorAnswer]) -> None:

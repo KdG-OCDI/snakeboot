@@ -1,6 +1,6 @@
 """snakeboot implements a repository interface when its module is imported, and stops the start when it cannot."""
 
-from collections.abc import Callable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import UTC, datetime
 from typing import Any, Protocol, override
 from uuid import UUID, uuid4
@@ -20,6 +20,7 @@ from snakeboot.data import (
     QueryCall,
     RepositoryOperations,
 )
+from snakeboot.data.auditing import audit
 from tests.data import sample_entities
 from tests.data.sample_entities import CellCount, GameRecord, GameRecords, MoveRecord, MoveRecords
 
@@ -37,6 +38,14 @@ class RecordingOperations(RepositoryOperations):
     def save(self, entity: Any) -> Any:
         self.calls.append(("save", entity))
         return entity
+
+    @override
+    def save_all(self, entities: Iterable[Any]) -> list[Any]:
+        return [self.save(entity) for entity in entities]
+
+    @override
+    def flush(self) -> None:
+        self.calls.append(("flush", None))
 
     @override
     def delete(self, entity: Any) -> None:
@@ -142,16 +151,29 @@ def test_one_result_where_several_were_found_stops_the_call() -> None:
         implementation_of(MoveRecords, RecordingOperations([move(), move()])).find_first_by_order_by_id_asc()
 
 
-def test_save_fills_the_created_date_once_and_the_last_modified_date_every_time() -> None:
-    moves = implementation_of(MoveRecords, RecordingOperations())
+def test_auditing_fills_the_created_date_once_and_the_last_modified_date_every_time() -> None:
+    record = move()
 
-    saved = moves.save(move())
-    created = saved.recorded_at
-    saved_again = moves.save(saved)
+    audit(record)
+    created = record.recorded_at
+    audit(record)
 
     assert created is not None
-    assert saved_again.recorded_at == created
-    assert saved_again.changed_at is not None
+    assert record.recorded_at == created
+    assert record.changed_at is not None
+
+
+def test_auditing_leaves_what_is_no_entity_alone() -> None:
+    audit(object())
+
+
+def test_save_leaves_auditing_to_the_binding_and_save_and_flush_flushes() -> None:
+    operations = RecordingOperations()
+
+    saved = implementation_of(MoveRecords, operations).save_and_flush(move())
+
+    assert saved.recorded_at is None
+    assert [kind for kind, _ in operations.calls] == ["save", "flush"]
 
 
 def test_crud_methods_select_by_the_identifier() -> None:

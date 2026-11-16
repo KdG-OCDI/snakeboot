@@ -2,16 +2,14 @@ import dataclasses
 import inspect
 import typing
 from collections.abc import Callable, Collection, Iterable, Mapping, Sequence
-from datetime import UTC, datetime
 from enum import StrEnum
 from typing import Any, ClassVar, Final, Union, get_args, get_origin
 
 from snakeboot.data.data_errors import EmptyResultError, IncorrectResultSizeError, InvalidRepositoryError
 from snakeboot.data.derived_query import Action, Condition, DerivedQuery, Operator, derive_query
-from snakeboot.data.entity import CreatedBy, CreatedDate, EntityDescription, LastModifiedBy, LastModifiedDate
+from snakeboot.data.entity import EntityDescription
 from snakeboot.data.query_methods import LOCK_ATTRIBUTE, QUERY_ATTRIBUTE
 from snakeboot.data.repository_operations import NativeQuery, PageRequest, QueryCall, RepositoryOperations
-from snakeboot.security import SecurityContext
 
 _EVERYTHING: Final = DerivedQuery(Action.FIND, alternatives=(), ordering=(), limit=None)
 
@@ -36,12 +34,28 @@ class RepositoryImplementation:
         self._operations = operations
 
     def save(self, entity: Any) -> Any:
-        """Fills the audit dates and auditors, then inserts or updates `entity`."""
-        return self._operations.save(_audited(self._entity, entity))
+        """Inserts or updates `entity`; the binding fills its audit fields when it writes it."""
+        return self._operations.save(entity)
+
+    def save_and_flush(self, entity: Any) -> Any:
+        """Saves `entity` and writes every pending change of the transaction now."""
+        saved = self._operations.save(entity)
+        self._operations.flush()
+        return saved
 
     def save_all(self, entities: Iterable[Any]) -> list[Any]:
-        """Saves every entity in order."""
-        return [self.save(entity) for entity in entities]
+        """Saves every entity in order, in one transaction: all of them, or none."""
+        return self._operations.save_all(entities)
+
+    def save_all_and_flush(self, entities: Iterable[Any]) -> list[Any]:
+        """Saves every entity in one transaction and writes every pending change of the transaction now."""
+        saved = self._operations.save_all(entities)
+        self._operations.flush()
+        return saved
+
+    def flush(self) -> None:
+        """Writes every pending change of the running transaction to the database now; commits nothing."""
+        self._operations.flush()
 
     def find_by_id(self, identifier: Any) -> Any:
         """Returns the entity with `identifier`, or None."""
@@ -192,19 +206,6 @@ def _one_of(results: list[Any], cardinality: Cardinality) -> Any:
     if not results and cardinality is Cardinality.ONE:
         raise EmptyResultError("Expected one result, found none.")
     return results[0] if results else None
-
-
-def _audited(entity: EntityDescription, value: Any) -> Any:
-    # Like Spring Data's AuditingHandler: the creation once, the last modification on every save.
-    now, principal = datetime.now(UTC), SecurityContext.current()
-    auditor = principal.name if principal is not None else None
-    for prop in entity.properties:
-        empty = getattr(value, prop.name) is None
-        if prop.marker(LastModifiedDate) is not None or (prop.marker(CreatedDate) is not None and empty):
-            setattr(value, prop.name, now)
-        elif prop.marker(LastModifiedBy) is not None or (prop.marker(CreatedBy) is not None and empty):
-            setattr(value, prop.name, auditor)
-    return value
 
 
 def _expect(fits: bool, name: str, rule: str) -> None:  # noqa: FBT001  # reason: a check reads as a sentence

@@ -10,7 +10,7 @@ import pytest
 from snakeboot.application import ApplicationContext
 from snakeboot.boot import CONDITIONAL_MODULES
 from snakeboot.boot.testing import SPY, TestApplication
-from snakeboot.events import ApplicationEventPublisher
+from snakeboot.events import ApplicationEventPublisher, InvalidApplicationEventListenerError
 from snakeboot.testing import Autowired, ModuleSlice, PublishedEvents, SpyComponent, application_test, verify
 from tests.command_line.sample_commands.applications import ApplicationWithoutCommands
 from tests.events.sample_contexts.contexts_application import ContextsApplication
@@ -23,6 +23,9 @@ from tests.events.sample_contexts.proposals.proposals import (
 from tests.events.sample_unbuildable_listener.unbuildable_listener_application import (
     SignedUp,
     UnbuildableListenerApplication,
+)
+from tests.events.sample_unregistered_listener.unregistered_listener_application import (
+    UnregisteredListenerApplication,
 )
 
 DEADLINE = date(2027, 3, 1)
@@ -132,3 +135,8 @@ def test_an_application_without_listeners_starts_and_publishing_tells_nobody() -
 
     assert not publisher.has_application_module_listeners
     context.close()
+
+
+def test_a_listener_method_on_a_class_that_does_not_declare_it_listens_stops_the_start() -> None:
+    with pytest.raises(InvalidApplicationEventListenerError, match=r"WelcomeService is no @application_event_listener"):
+        ApplicationContext.start(UnregisteredListenerApplication, CONDITIONAL_MODULES)

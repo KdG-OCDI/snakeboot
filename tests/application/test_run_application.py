@@ -35,7 +35,9 @@ def without_the_secrets(monkeypatch: pytest.MonkeyPatch) -> None:
 def test_runs_the_command_its_first_argument_names(capsys: pytest.CaptureFixture[str]) -> None:
     run(CommandsApplication, ["myapp", "silent-night"])
 
-    assert capsys.readouterr().err == ""
+    assert capsys.readouterr().err == "", (
+        "only silent-night ran: refuse, which would fail, did not, unlike Spring's runners"
+    )
 
 
 def test_a_command_line_error_ends_the_process_with_status_1(capsys: pytest.CaptureFixture[str]) -> None:

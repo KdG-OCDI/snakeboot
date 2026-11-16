@@ -76,14 +76,17 @@ class TestApplication:
     The application starts as it does for real, from its application.toml and the active profile, with these
     differences: `overrides` replace components with doubles, or wrap them in a spy (`SPY`); with `[database]` the
     database is a fresh SQLite in memory that the application's migrations built and that was checked against the
-    entities, as Spring Boot's tests run Flyway on H2 with `ddl-auto=validate` (without migrations, or in a `WebSlice`,
-    which runs none, the tables of the entities), or a copy of a PostgreSQL that the migrations built
+    entities, like Hibernate's `ddl-auto=validate` (without migrations, or in a `WebSlice`, which runs none, the
+    tables of the entities), or a copy of a PostgreSQL that the migrations built
     (`TestEnvironment.database`); with `[cache]` the cache is an `InMemoryCache`;
     with `[rabbitmq]` the `RabbitTemplate` hands its messages to the application's own `@rabbit_listener` methods,
     without a broker (`InProcessRabbitTemplate`); the `@application_module_listener` methods run on the caller's
     thread, so what they did is there when the call that published returns; every event is kept in
     `published_events`; the API accepts the tokens of `signed_in_as` next to its own, and with `[oauth2]` the tokens
     its `AuthorizationServer` signs (`snakeboot.oauth2.testing`). `local_server()` serves it over HTTP.
+
+    Spring Boot's `@SpringBootTest` replaces none of this by itself. A test on this application is deterministic and
+    runs on one thread: it does not show the concurrency, the locks or the delivery of the real infrastructure.
 
     `snakeboot.testing.application_test` starts it for a test and injects what the test asks for.
     """

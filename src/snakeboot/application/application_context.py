@@ -28,6 +28,8 @@ from snakeboot.configuration import (
     begin_configuration,
     sections_declared_in,
 )
+from snakeboot.events.application_event_listener import refuse_listener_methods_nobody_registers
+from snakeboot.events.event_listener_markers import LISTENER_MAPPING_ATTRIBUTE, ListenerMapping
 from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.transaction import TransactionManager, TransactionManagerRegistry
@@ -228,6 +230,8 @@ class ApplicationContext(ApplicationComponents):
             error.add_note("Raised while the application started and built its event listeners.")
             raise
         processor.register_listeners()
+        marked = self.scan.methods_marked(LISTENER_MAPPING_ATTRIBUTE, ListenerMapping)
+        refuse_listener_methods_nobody_registers((method.name, method.owner) for method in marked)
 
     def _module_names(self) -> list[str]:
         # The sections of snakeboot are declared outside the scan: their modules hold their providers.

@@ -18,7 +18,7 @@ applications. The one library an application does share with snakeboot is Pydant
 
 | snakeboot | Spring Boot | Needs |
 |---|---|---|
-| `@transactional`, `after_commit` | `@Transactional`, `@TransactionalEventListener(AFTER_COMMIT)` | nothing |
+| `@transactional`, `Propagation`, `after_commit` | `@Transactional`, `Propagation`, `TransactionSynchronization.afterCommit` | nothing |
 | `@application_root`, `ComponentScan` | `@SpringBootApplication`, `@ComponentScan` | nothing |
 | `@component`, `@service`, `@repository`, `@bean`, `Qualifier` | `@Component`, `@Service`, `@Repository`, `@Bean`, `@Qualifier` | wireup |
 | `ApplicationEventPublisher`, `@event_listener`, `@transactional_event_listener` | the same names | wireup |
@@ -38,12 +38,12 @@ applications. The one library an application does share with snakeboot is Pydant
 | `@entity`, `Id`, `Column`, `Index`, `CreatedDate`, `LastModifiedDate` | `@Entity`, `@Id`, `@Column`, `@Index`, `@CreatedDate`, `@LastModifiedDate` | `snakeboot[data]` |
 | `UniqueConstraint`, `ForeignKey`, `BigInt`, `SmallInt` | `@UniqueConstraint`, `@JoinColumn` with `@ForeignKey` and `@OnDelete`, `long`, `short` | `snakeboot[data]` |
 | `Version`, `CreatedBy`, `LastModifiedBy`, `OptimisticLockingFailureError` | `@Version`, `@CreatedBy`, `@LastModifiedBy`, `OptimisticLockingFailureException` | `snakeboot[data]` |
-| `CrudRepository`, derived queries, `@query`, `@lock`, `PageRequest` | Spring Data's `CrudRepository`, query methods, `@Query`, `@Lock`, `Pageable` | `snakeboot[data]` |
+| `CrudRepository`, derived queries, `@query`, `@lock`, `PageRequest` | Spring Data's `CrudRepository`, query methods, `@Query(nativeQuery = true)`, `@Lock`, `Pageable` | `snakeboot[data]` |
 | `migrate`, `make_migration`, `migrations/V1__*.sql` | Flyway | `snakeboot[data]` |
 | `Vector` | Spring AI's pgvector store | `snakeboot[data,vector]` |
 | `Cache`, `InMemoryCache` | Spring's `Cache`, `RedisCacheManager` | `snakeboot[cache]` for Redis |
 | `JwtBearerAuthentication`, `OAuth2Properties` | `spring-boot-starter-oauth2-resource-server` | `snakeboot[oauth2]` |
-| `CommandLineRunner`, `CommandLineError` | `CommandLineRunner`, Spring Shell's `@Command` | wireup |
+| `CommandLineRunner`, `CommandLineError` | Spring Shell's `@Command`: one command, chosen on the command line (not Spring Boot's runners, which all run at every start) | wireup |
 | `Lifecycle`, `ApplicationReadyEvent`, `run_lifecycle` | `SmartLifecycle`, `ApplicationReadyEvent`, an application without the web starter | wireup |
 | `@scheduled`, `SchedulingProperties` | `@Scheduled` | `snakeboot[configuration]` |
 | `[events]`, `EventsProperties` | `spring.modulith.events.*` | `snakeboot[data]` |
@@ -127,6 +127,27 @@ class TemplateDownloadAdapter:
     def __init__(self, opener: Annotated[OpenerDirector, Qualifier("templates")]) -> None: ...
 ```
 
+Inheritance alone registers nothing. Spring injects a bean wherever its type fits, so implementing an interface is
+enough there; here a class is a component of its own type only, and `as_type` names the port it is also found by.
+Implementing a Protocol or extending an ABC says what a class can do, `as_type` says what the container hands out:
+without it, `PlaceBidUseCase` above stops the start, as nobody provides an `AuctionRepositoryPort`. Two
+implementations of one port each name a `qualifier`, and a parameter asks for one with `Qualifier`; snakeboot has no
+`@Primary`, so an unqualified request for a port with only qualified implementations stops the start too.
+
+`@bean` registers a factory; it does not remember its calls. The container calls it once and hands its result to
+everyone who asks, but calling the function yourself is a plain Python call that builds a new object each time, like a
+`@Bean` method of Spring's lite mode (`@Configuration(proxyBeanMethods = false)`), not of a proxied `@Configuration`. A
+factory that needs another component takes it as a parameter rather than calling the other factory:
+
+```python
+@bean
+def http_client(properties: DownloadProperties) -> HttpClient: ...
+
+
+@bean
+def template_opener(client: HttpClient) -> OpenerDirector: ...  # not: http_client(...)
+```
+
 A controller, a listener, a command, a `Lifecycle` and a section are components by their own decorator or base class
 and take none of these. wireup stays underneath, so its own `@injectable` still works where an application has it;
 `stereotype_of` tells an architecture test what a class declared.
@@ -205,6 +226,29 @@ not extend `Section`, changes its `model_config` or has a default; when a file o
 or a table is unknown (a typo in `application.toml` or in `CHATBOT__LLM__MODLE`). Outside an application,
 `load_configuration(ChatbotProperties, package="myapp")` reads the sections it is given.
 
+This is narrower than Spring Boot on purpose: every value an application runs with is in one file a reader can open.
+
+| | snakeboot | Spring Boot |
+|---|---|---|
+| Sources | `application.toml`, one profile file, environment variables | also command-line arguments, external files, system properties, ... |
+| `application.toml` | required | optional |
+| A default of an application's own section | refused: the default belongs in `application.toml` | a field initialiser or `@DefaultValue` |
+| An unknown key or table | stops the start | ignored |
+| Active profiles | at most one, `SNAKEBOOT_PROFILE=local` | several, `SPRING_PROFILES_ACTIVE=local,debug` |
+| What a profile selects | configuration values only | also beans, with `@Profile` |
+
+The optional tables of snakeboot itself (`[events]`, `max_upload_size`, `banner`, ...) do have defaults: they are
+snakeboot's, not the application's. An application's default is a value in `application.toml`, which an environment
+variable overrides for one deployment:
+
+```toml
+[chatbot]
+model = "small"             # the default; CHATBOT__MODEL=large overrides it
+```
+
+`model: str = "small"` stops the start (`... has a default`), so does `SNAKEBOOT_PROFILE=local,debug` (one profile at
+a time) and a profile without its file (`application-local.toml` missing).
+
 **Entities and repositories.** An entity is a plain dataclass that a table keeps, like a JPA `@Entity`; a repository is
 an interface, a Protocol that extends `CrudRepository`, which snakeboot implements when its module is imported, like
 Spring Data. Its methods are derived from their names (`find_by`, `count_by`, `exists_by`, `delete_by`, conditions
@@ -237,10 +281,43 @@ class GameRecords(CrudRepository[GameRecord, UUID], Protocol):
 ```
 
 `save` inserts or updates by identifier, like Spring Data's; every call joins the transaction of the running
-`@transactional`, or runs in one of its own. A `Version()` field guards against lost updates, like JPA's `@Version`:
+`@transactional`, or runs in one of its own. Use the entity it returns: a generated number and the audit fields are in
+that one. A `Version()` field guards against lost updates, like JPA's `@Version`:
 saving an entity another transaction changed since it was read raises `OptimisticLockingFailureError` (answer it with
 409), and a broken constraint is a `DataIntegrityViolationError`. `CreatedBy()` and `LastModifiedBy()` record who
 saved, from the `SecurityContext`, next to `CreatedDate()` and `LastModifiedDate()`.
+
+Like JPA, a transaction writes what it changed of the entities it loaded, also without `save`: at its commit, or
+earlier at a flush (`flush()`, `save`, or a query that needs the change). The audit fields are filled at that write,
+in the same transaction as the data, so a rolled-back change leaves neither; the date is the moment of the flush, the
+auditor the principal signed in on the thread that flushes. An entity that did not change is not written and keeps its
+audit fields and version. A native `@query` that changes rows writes no entity, so it audits nothing.
+
+```python
+@transactional
+def rename(self, workshop_id: str, title: str) -> None:
+    workshop = self._workshops.find_by_id(workshop_id)
+    workshop.title = title  # written at the commit, with LastModifiedBy and LastModifiedDate
+```
+
+`save_all` is one atomic operation, like Spring Data JPA's `saveAll`: without a running transaction it runs in one of
+its own and saves every entity or none, also when a later one breaks a constraint. Unlike Spring Data JPA's `save`,
+snakeboot's `save` writes the change at once (a flush, not a commit), so a broken constraint or a lost update is raised
+at the call; `save_and_flush` and `flush()` say so explicitly, as `JpaRepository` does. A flush is never a commit: a
+later rollback still undoes it.
+
+`@query` takes native SQL, as `@Query(nativeQuery = true)` does, not JPQL: it names the table and its columns
+(`tictactoe_game`, `join_deadline`), not the entity and its fields, and its parameters are `:named` after the method's
+parameters. A result of the entity type is that entity; of a scalar type (`int`, `str`, ...) the first column; of any
+other type an object made from the columns by name, such as `StatusCount` above. `modifying=True` marks a statement
+that changes rows; it returns how many. The SQL is the database's own dialect, so a `@query` written for PostgreSQL
+(`::text`, `<=>`) may not run on the SQLite of a test. The start checks the method (its parameters and return
+annotation), not the SQL: a misspelt column fails when the query first runs.
+
+```python
+@query("SELECT * FROM tictactoe_game WHERE status = :status AND join_deadline < :deadline")
+def find_expired(self, status: str, deadline: datetime) -> list[GameRecord]: ...
+```
 
 ```python
 class GameRecord:
@@ -319,8 +396,11 @@ before 0.8) keeps its schema and its data where they are: no export, no import.
    the previous version still runs on the same database, and going back is deploying it again, without a restore.
 
 **Transactions.** A use case declares its boundary; snakeboot chooses the technology, SQLAlchemy's session when the
-application has `[database]`. A nested `@transactional` call is a savepoint; `after_commit` waits for the outermost
-commit and is dropped by a rollback.
+application has `[database]`. Like Spring's default `Propagation.REQUIRED`, a `@transactional` call inside a running
+transaction joins it: one physical transaction, one commit at the outermost call. An exception that leaves a joined
+call marks the whole transaction rollback-only, also when a caller catches it: the outermost call then rolls everything
+back and raises `UnexpectedRollbackError`, as Spring raises `UnexpectedRollbackException`. `after_commit` waits for
+that commit and is dropped by a rollback.
 
 ```python
 @service
@@ -333,6 +413,54 @@ class CancelRegistrationUseCase:
         self._events.publish_all(workshop.pull_events())
 ```
 
+| Propagation | Inside a running transaction | Spring |
+|---|---|---|
+| `REQUIRED` (default) | joins it; a failure dooms the whole transaction | `REQUIRED` |
+| `NESTED` | a savepoint: a failure undoes only this call's work, and the caller may go on | `NESTED` |
+| `REQUIRES_NEW` | an independent transaction on a connection of its own, which commits by itself (PostgreSQL only) | `REQUIRES_NEW` |
+
+```python
+@transactional(propagation=Propagation.NESTED)  # its failure may be caught and survived
+def reserve_optional_extra(self, ...) -> None: ...
+
+
+@transactional(read_only=True, isolation=Isolation.REPEATABLE_READ)
+def report(self) -> Report: ...
+
+
+@transactional(no_rollback_for=(PaymentDeclinedError,))  # commits, then the error reaches the caller
+def record_declined_payment(self, ...) -> None: ...
+```
+
+A savepoint is no commit: a `NESTED` call's work still rolls back with the outer transaction. SQLite cannot run a
+second transaction beside a suspended one, so `REQUIRES_NEW` there raises `IllegalTransactionStateError`; test it on
+PostgreSQL. Every exception rolls back, since Python has no checked exceptions to tell apart from Spring's
+`RuntimeException`; `no_rollback_for` names the ones that do not. `read_only=True` refuses to write a changed entity
+(`ReadOnlyTransactionError`, and PostgreSQL refuses any write); `isolation` applies to a transaction the call starts,
+and a joined call that asks one is refused. There is no `timeout`.
+
+`@transactional` wraps the Python method itself, so it also applies when another method of the same object calls it
+through `self`. Spring's default proxies see only calls from outside the bean, and a `this.inner()` there runs without
+the transactional behaviour; here `place_order()` below runs `save_order()` in a transaction, joined or started as its
+propagation says, although `place_order()` itself is not transactional.
+
+```python
+@service
+class OrderService:
+    def place_order(self) -> None:
+        self.save_order()
+
+    @transactional
+    def save_order(self) -> None: ...
+```
+
+`after_commit` and the listeners after the commit run once the transaction's session is closed: a repository call in
+one runs in a transaction of its own, which commits by itself. A failing callback is logged, and the next one still
+runs; the caller of the commit does not hear of it, since its work committed (unlike Spring's
+`TransactionSynchronization.afterCommit`, whose runtime exception reaches it). So a committed transaction does not
+prove that its side effects succeeded: what must happen belongs in an `@application_module_listener`, below, whose
+publication is kept until it succeeds.
+
 **Application events.** Listeners react to facts after the commit, so a rolled-back change never
 reaches anyone, and a failing listener cannot undo a committed one.
 
@@ -344,6 +472,33 @@ class ParticipantNotificationListener:
 
     @transactional_event_listener(WaitlistedParticipantPromoted)
     def notify_promoted(self, event: WaitlistedParticipantPromoted) -> None: ...
+```
+
+A `@transactional_event_listener` hears an event only when it was published while a transaction ran, as in Spring:
+published outside one (no `@transactional` around it, or after a repository's own transaction ended) it is skipped,
+also in an application without a database, unless it says `fallback_execution=True`, which delivers it at once.
+`phase=` chooses when it runs, like Spring's `TransactionPhase`: `AFTER_COMMIT` (the default), `BEFORE_COMMIT` (inside
+the transaction: its writes commit with it, its failure rolls it back), `AFTER_ROLLBACK` or `AFTER_COMPLETION`.
+
+```python
+@transactional_event_listener(OrderPlaced, phase=TransactionPhase.AFTER_ROLLBACK)
+def report_failed_order(self, event: OrderPlaced) -> None: ...
+```
+
+The class declares that it listens, with `@application_event_listener`. Spring finds an `@EventListener` on any bean;
+here a listener method on a class without that declaration (a `@service`, say) stops the start, since nobody would
+register it. A listener method returns None: Spring publishes what a synchronous listener returns as a next event,
+snakeboot refuses a listener that declares a return type, so a follow-up event is published explicitly:
+
+```python
+@application_event_listener
+class InvoiceOnOrderPlaced:
+    def __init__(self, events: ApplicationEventPublisher) -> None:
+        self._events = events
+
+    @event_listener(OrderPlaced)
+    def create_invoice(self, event: OrderPlaced) -> None:
+        self._events.publish(InvoiceCreated(event.order_id))  # not: return InvoiceCreated(...)
 ```
 
 A listener may inject any component, also a use case that publishes events of its own, as a listener between two
@@ -384,9 +539,12 @@ class InvoiceOnOrderPlaced:
 the component scan, the same modules that fill the container, and `snakeboot.fastapi_web` publishes their routes.
 A controller sees no request: an endpoint takes what the call carries (path and query parameters, a body as a
 Pydantic model) and returns the body, whose type is its return annotation; `status=` sets the status of the answer,
-like `@ResponseStatus`. A call that does not fit (a missing field, a wrong type) is an `InvalidRequestError`, which
-an advice answers like any error, as with Spring's `MethodArgumentNotValidException`. Two endpoints for the same URL,
-two answers for one error, or a method that takes `request` stop the start-up.
+like `@ResponseStatus`. A call that does not fit (a missing field, a wrong type, a body that is no JSON) is an
+`InvalidRequestError`. Without an advice for it the API answers 400 Bad Request, as Spring MVC answers a failed
+`@Valid @RequestBody`, with `{"code": "invalid_request", "detail": "body.title: Field required"}`, and the OpenAPI
+document says so; an advice answers it like any error, as with Spring's `MethodArgumentNotValidException`, with
+another status (FastAPI's own convention is 422) or body. Two endpoints for the same URL, two answers for one error,
+or a method that takes `request` stop the start-up.
 
 ```python
 @rest_controller("/workshops", tags=["workshops"])
@@ -407,7 +565,7 @@ class EnrollmentRestErrorAdvice:
     def answer_not_found(self, error: Exception) -> dict[str, str]:
         return error_answer(error)  # {"code": "workshop_not_found", "detail": "..."}
 
-    @exception_handler(InvalidRequestError, status=422)
+    @exception_handler(InvalidRequestError, status=422)  # optional: without it, 400 with the same body
     def answer_invalid_request(self, error: Exception) -> dict[str, str]:
         return error_answer(error)  # {"code": "invalid_request", "detail": "body.title: Field required"}
 ```
@@ -465,6 +623,12 @@ receives whom the token belongs to, like `@AuthenticationPrincipal`. `/health` s
 with one of its roles, like `@RolesAllowed`, and answers anybody else 403 `{"detail": "Forbidden"}`. While an endpoint
 runs, its caller is signed in to the `SecurityContext`, like Spring's `SecurityContextHolder`.
 
+`@roles_allowed` protects HTTP endpoints, not methods: the binding checks it when it dispatches a request, and nothing
+checks a direct call of a service, a command or a listener. Spring checks a service method only with method security
+switched on (`@EnableMethodSecurity(jsr250Enabled = true)`), and snakeboot has none, so `@roles_allowed` on a class
+that is no `@rest_controller`, or on a controller method that is no `@route`, stops the start instead of looking like
+protection. A use case that must check who calls it reads `SecurityContext.current()` itself.
+
 ```python
 class KeycloakTokens(BearerAuthentication):
     def __init__(self, properties: SecurityProperties) -> None:
@@ -498,12 +662,25 @@ component starts, like a `SmartLifecycle` bean, and
 runs the same lifecycle without a web server, until SIGTERM: a process that only listens and schedules, like Spring
 Boot without the web starter.
 
-**Commands.** A subclass of `CommandLineRunner` that names its command is a command of the application, like a
-`CommandLineRunner` bean: a component whose constructor receives use cases and ports, with arguments declared as with
+**Commands.** A subclass of `CommandLineRunner` that names its command is a command of the application: a
+component whose constructor receives use cases and ports, with arguments declared as with
 argparse in a classmethod, because they are parsed before the command is built: `--help` answers at once, even when
 the command depends on a server that is down. `python -m myapp self_play --games 20` runs it; `python -m myapp help`
 lists the application's commands and snakeboot's own (`serve`, `run_lifecycle`, `migrate`, `make_migration`). A
 `CommandLineError` stops the command with its message and exit status 1; two commands of one name stop the start.
+
+The name is Spring Boot's, the behaviour is closer to a Spring Shell command: the first argument chooses the one
+command that runs, and `python -m myapp serve` runs the server, not every other command. Spring Boot runs every
+`CommandLineRunner` bean at each start, which is where Spring applications put their initialisation; in snakeboot that
+belongs in a `Lifecycle` component, which `serve` and `run_lifecycle` start, or in a listener of
+`ApplicationReadyEvent`:
+
+```python
+@application_event_listener
+class WarmUpCache:
+    @event_listener(ApplicationReadyEvent)
+    def warm_up(self, event: ApplicationReadyEvent) -> None: ...  # at every start of the server
+```
 
 ```python
 class SelfPlayCommand(CommandLineRunner, command="self_play"):
@@ -523,7 +700,11 @@ class SelfPlayCommand(CommandLineRunner, command="self_play"):
 ```
 
 **Scheduled methods.** `@scheduled` on a method of a component runs it periodically, like `@Scheduled`: with a fixed
-rate or a fixed delay, on one thread. A method that raises is logged and runs again at its next turn.
+rate or a fixed delay, on one thread. A method that raises is logged and runs again at its next turn. A fixed rate
+keeps to the schedule of its first run, as Spring's `ThreadPoolTaskScheduler` does: when a run, or another method on
+the one thread, takes longer than the period, the turns it delayed run back to back once the thread is free (every
+10 seconds, a first run of 25 seconds and short runs after it start at 0, 25, 26, 30, ...). It is no promise of
+punctuality.
 `[scheduling] auto_startup = false` keeps a process from running them. Every replica runs its own scheduler;
 `@scheduler_lock`, like ShedLock's `@SchedulerLock`, lets the replica that takes the lock run a turn and the others
 skip it. The lock is a row of `snakeboot_scheduler_lock` in the database, held for at most `at_most_for` (the lock of
@@ -709,8 +890,8 @@ class TestWithARepositoryThatLosesTheUpdate:
 
 The infrastructure of a test is snakeboot's own, so nothing outside the test runs:
 
-* **The database** is a fresh SQLite in memory, built by the application's own migrations, like Flyway's on H2 in
-  Spring Boot's tests: the scripts `migrate` runs, all of them, also in a module slice (a web slice runs none, below).
+* **The database** is a fresh SQLite in memory, built by the application's own migrations, as
+  `@AutoConfigureTestDatabase` puts an embedded database under Flyway: the scripts `migrate` runs, all of them, also in a module slice (a web slice runs none, below).
   They run once per process, and every test gets a copy of the result. First the migrated schema is compared with the
   entities, like Hibernate's `ddl-auto=validate`: a table, column, NOT NULL or index the migrations lack stops the
   tests, with the SQL `make_migration` would still write. SQLite takes the type names of a migration as they come and
@@ -733,6 +914,42 @@ The infrastructure of a test is snakeboot's own, so nothing outside the test run
   What a listener with `dead_letter=True` refuses is in `dead_lettered` too, as its dead-letter queue would keep it.
 * **The cache** is an `InMemoryCache`; the `@application_module_listener` methods run on the caller's thread, so what
   they did is there when the call that published returns.
+
+`@SpringBootTest` alone replaces none of this: it starts the application with its own database, broker and executor,
+unless a test asks otherwise. So know what a test of snakeboot shows, and what it does not:
+
+| | The application | `@application_test` |
+|---|---|---|
+| Database | PostgreSQL, or the SQLite file of `[database]` | a fresh SQLite in memory, or `PostgreSQLContainer()` |
+| Between two tests | | the database again as the migrations built it (copied back, not a rolled-back transaction) |
+| Cache | Redis | `InMemoryCache`, emptied |
+| Broker | RabbitMQ | `InProcessRabbitTemplate`, emptied: delivered after the commit, in the sender's thread |
+| `@application_module_listener` | a thread pool, after the commit | the caller's thread, after the commit (`SyncTaskExecutor`) |
+| Callers | tokens of the `BearerAuthentication` | those tokens, and `signed_in_as(...)` |
+| Components | built once | built once per kept application; test components and mocks per test |
+
+A test passes deterministically where production runs concurrently. It does not show that two requests may run at
+once, that the locks hold, that a listener on its own thread finds what it needs, or that a broker delivers in time.
+A test like this one passes, while in production the invoice may not exist yet when the order is read, since the
+listener runs on another thread:
+
+```python
+@application_test
+def test_an_order_has_its_invoice(client: Autowired[RestClient]) -> None:
+    order = client.post("/api/orders", json={"item": "book"}).json()  # an @application_module_listener invoices
+
+    assert client.get(f"/api/orders/{order['id']}").json()["invoice"] is not None  # true here: same thread
+```
+
+What depends on threads, locks or the database's own behaviour needs a test on the real thing: PostgreSQL in a
+container for locks, isolation and `REQUIRES_NEW`, and a test that starts its own threads (`eventually(...)` waits for
+what they do) or an integration test against a deployed broker. snakeboot does not yet start RabbitMQ or Redis in a
+container (issue #6), nor run the module listeners on their own threads in an `@application_test`.
+
+Unlike a Spring test marked `@Transactional`, a test runs in no transaction of its own that rolls back at its end:
+every call commits, as in production, and snakeboot copies the database back between tests. So a test sees what was
+committed, also across threads and HTTP calls. A component of the application that keeps state in memory keeps it
+from one test to the next, as the application is shared; mark such a test `@dirties_application`.
 
 ```python
 @application_test(database=PostgreSQLContainer())
