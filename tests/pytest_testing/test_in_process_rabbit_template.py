@@ -10,7 +10,7 @@ import pytest
 
 from snakeboot.rabbitmq import InProcessRabbitTemplate, MessageConversionError, RejectAndDontRequeueError
 from snakeboot.rabbitmq.in_process_rabbit_template import _routes
-from snakeboot.testing import Autowired, application_test
+from snakeboot.testing import Autowired, application_test, dirties_application
 from snakeboot.transaction import transactional
 from tests.pytest_testing.parcels.parcels import (
     CarrierListener,
@@ -20,7 +20,10 @@ from tests.pytest_testing.parcels.parcels import (
     SendParcel,
 )
 
-parcels_test = application_test(application=ParcelsApplication)
+
+def parcels_test[T](test: T) -> T:
+    """A test of the parcels; its listeners keep what they heard, so every test starts the application anew."""
+    return application_test(application=ParcelsApplication)(dirties_application(test))
 
 
 @parcels_test

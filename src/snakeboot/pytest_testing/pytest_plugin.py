@@ -2,20 +2,22 @@
 
 pytest loads it by itself, through the entry point `pytest11` of snakeboot. Until a test needs its application it
 imports only pytest and `snakeboot.testing`, so a project without `@application_test`, or without a web server, loads
-nothing more. Every test gets its own application, with fresh test components and mocks: nothing to clean up between
-tests, where Spring keeps one context and empties it.
+nothing more. Tests that ask the same application share one start of it, like Spring's test context cache
+(`kept_applications`); between two tests it is reset, so each finds the database, the cache, the events, the mocks
+and the test components as a fresh start leaves them. `@dirties_application` closes it after a test instead.
 """
 
 from collections.abc import Iterator, Mapping
-from typing import TYPE_CHECKING, Any, Final
-from unittest.mock import create_autospec
+from typing import Final
 
 import pytest
 
+from snakeboot.pytest_testing.kept_applications import ApplicationSetUp, KeptApplications, RunningApplication
 from snakeboot.testing.application_marker import (
     APPLICATION_TEST_FIXTURE,
     ApplicationTest,
     application_test_of,
+    dirties_the_application,
     injected_fields_of,
     injected_parameters_of,
 )
@@ -23,36 +25,27 @@ from snakeboot.testing.component_replacements import nested_test_components
 from snakeboot.testing.injection import Injection, InjectionPoint
 from snakeboot.testing.source_scan import ApplicationNotFoundError, ProjectSources
 
-if TYPE_CHECKING:
-    from snakeboot.boot.testing import TestApplication
-
 _SOURCES: Final = pytest.StashKey[ProjectSources]()
+_KEPT: Final = pytest.StashKey[KeptApplications]()
 
 
 @pytest.fixture(name=APPLICATION_TEST_FIXTURE)
 def application_test_fixture(request: pytest.FixtureRequest) -> Iterator[Mapping[str, object]]:
-    """Starts the application of an `@application_test` for one test, fills its fields and hands its parameters."""
-    from snakeboot.boot.testing import SPY, TestApplication  # noqa: PLC0415  # reason: only a test that starts one needs it
-
-    marker = _marker_of(request)
+    """Hands an `@application_test` its started application: fills the fields of its class and its parameters."""
     fields = injected_fields_of(request.cls) if application_test_of(request.cls) is not None else {}
     parameters = injected_parameters_of(request.function)
-    points = [*fields.values(), *parameters.values()]
-    mocks = {p.component_type: create_autospec(p.component_type, instance=True) for p in points if _is(p, "MOCK")}
-    # A spy is in place before the listeners are built, like @MockitoSpyBean before the beans that depend on it.
-    spies = {p.component_type: SPY for p in points if _is(p, "SPY")}
-    sources = _sources_of(request.config)
-    test_components = {**sources.test_components(), **nested_test_components(_classes_of(request), mocks.keys())}
-    with TestApplication.start(
-        _application_of(marker, sources),
-        {**spies, **mocks},
-        environment=marker.environment,
-        only=marker.only,
-        test_components={replaced: _built(component) for replaced, component in test_components.items()},
-    ) as started:
+    set_up = _set_up_of(request, [*fields.values(), *parameters.values()])
+    kept = _kept_applications_of(request.config)
+    running = kept.running(set_up)
+    try:
         for name, point in fields.items():
-            setattr(request.instance, name, _injected(started, mocks, point))
-        yield {name: _injected(started, mocks, point) for name, point in parameters.items()}
+            setattr(request.instance, name, _injected(running, point))
+        yield {name: _injected(running, point) for name, point in parameters.items()}
+    finally:
+        if _dirties(request):
+            running.application.close()
+        else:
+            kept.keep(set_up, running)
 
 
 @pytest.fixture(autouse=True)
@@ -67,6 +60,31 @@ def _marker_of(request: pytest.FixtureRequest) -> ApplicationTest:
     if marker is None:
         pytest.fail(f"{request.node.name} asks for {APPLICATION_TEST_FIXTURE}, but is no @application_test.")
     return marker
+
+
+def _set_up_of(request: pytest.FixtureRequest, points: list[InjectionPoint]) -> ApplicationSetUp:
+    marker = _marker_of(request)
+    sources = _sources_of(request.config)
+    mocked = tuple(dict.fromkeys(point.component_type for point in points if point.injection is Injection.MOCK))
+    return ApplicationSetUp(
+        _application_of(marker, sources),
+        marker.environment,
+        marker.only,
+        mocked=mocked,
+        spied=tuple(dict.fromkeys(point.component_type for point in points if point.injection is Injection.SPY)),
+        test_components={**sources.test_components(), **nested_test_components(_classes_of(request), mocked)},
+    )
+
+
+def _dirties(request: pytest.FixtureRequest) -> bool:
+    return dirties_the_application(request.function) or dirties_the_application(request.cls)
+
+
+def _kept_applications_of(config: pytest.Config) -> KeptApplications:
+    if _KEPT not in config.stash:
+        config.stash[_KEPT] = KeptApplications()
+        config.add_cleanup(config.stash[_KEPT].close)
+    return config.stash[_KEPT]
 
 
 def _classes_of(request: pytest.FixtureRequest) -> list[type]:
@@ -89,22 +107,11 @@ def _application_of(marker: ApplicationTest, sources: ProjectSources) -> type:
         pytest.fail(str(error), pytrace=False)
 
 
-def _built(component: type) -> object:
-    try:
-        return component()
-    except TypeError as error:
-        raise TypeError(f"A test component is built without arguments; {component.__qualname__}: {error}") from error
-
-
-def _is(point: InjectionPoint, injection: str) -> bool:
-    return point.injection is Injection[injection]
-
-
-def _injected(started: "TestApplication", mocks: Mapping[Any, object], point: InjectionPoint) -> object:
-    from snakeboot.boot.testing import RestClient  # noqa: PLC0415  # reason: as TestApplication above
+def _injected(running: RunningApplication, point: InjectionPoint) -> object:
+    from snakeboot.boot.testing import RestClient  # noqa: PLC0415  # reason: only a test that starts one needs it
 
     if point.injection is Injection.MOCK:
-        return mocks[point.component_type]
+        return running.mocks[point.component_type]
     if point.component_type is RestClient:
-        return started.client()
-    return started.get(point.component_type)
+        return running.application.client()
+    return running.application.get(point.component_type)

@@ -14,6 +14,7 @@ APPLICATION_TEST_FIXTURE: Final = "snakeboot_application_test"
 
 _MARKER: Final = "__snakeboot_application_test__"
 _PARAMETERS: Final = "__snakeboot_injected_parameters__"
+_DIRTIES: Final = "__snakeboot_dirties_application__"
 
 
 @dataclass(frozen=True, slots=True)
@@ -61,7 +62,7 @@ def application_test(
     properties: Mapping[str, object] | None = None,
     database: PostgreSQLContainer | None = None,
 ) -> object:
-    """A test of the whole application, like `@SpringBootTest`: snakeboot starts it anew for every test it marks.
+    """A test of the whole application, like `@SpringBootTest`: snakeboot starts it, and resets it between tests.
 
         @application_test
         class TestClosing:
@@ -147,6 +148,27 @@ def application_module_test(
     properties = MappingProxyType(dict(properties or {}))
     environment = TestEnvironment(profile, properties, database)
     return ApplicationTest(application, environment, only=ModuleSlice(packages))
+
+
+def dirties_application[T](test: T) -> T:
+    """Closes the application after a test, or after every test of a class, like Spring's `@DirtiesContext`.
+
+        @application_test
+        @dirties_application
+        def test_the_rate_limiter_blocks_the_sixth_call(client: Autowired[RestClient]) -> None: ...
+
+    snakeboot keeps a started application for the next test that asks the same one, and resets in between what it
+    made for the test: the database, the cache, the published events, the mocks and spies, the test components. What
+    a component of the application itself keeps in memory (a counter, a registry of connections) it cannot reset: a
+    test that changes such a thing says so here, and the next test starts the application anew.
+    """
+    setattr(test, _DIRTIES, True)
+    return test
+
+
+def dirties_the_application(test: object) -> bool:
+    """Tells whether a test function or a test class is marked `@dirties_application`."""
+    return getattr(test, _DIRTIES, False) is True
 
 
 def application_test_of(test: object) -> ApplicationTest | None:

@@ -42,3 +42,8 @@ class InMemoryCache(Cache):
     def evict(self, key: str) -> None:
         with self._lock:
             self._values.pop(key, None)
+
+    def clear(self) -> None:
+        """Forgets every value, as a test that keeps its application does before the next test."""
+        with self._lock:
+            self._values.clear()

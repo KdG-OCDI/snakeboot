@@ -4,7 +4,7 @@
     class FixedClock(ClockPort): ...
 
     @application_test                                       # @SpringBootTest: the one @application_root, started
-    class TestInvoicing:                                    # anew for every test
+    class TestInvoicing:                                    # once, and reset between its tests
         client: Autowired[RestClient]                       # @Autowired
         clock: Autowired[FixedClock]                        # the test component, by its own type
         invoices: MockComponent[InvoiceRepositoryPort]      # @MockitoBean; SpyComponent is @MockitoSpyBean
@@ -26,6 +26,7 @@ from snakeboot.testing.application_marker import (
     ApplicationTest,
     application_module_test,
     application_test,
+    dirties_application,
     web_test,
 )
 from snakeboot.testing.component_replacements import InvalidTestComponentError, test_component
@@ -59,6 +60,7 @@ __all__ = [
     "application_module_test",
     "application_test",
     "declared_classes",
+    "dirties_application",
     "eventually",
     "qualified_names",
     "signed_in_as",

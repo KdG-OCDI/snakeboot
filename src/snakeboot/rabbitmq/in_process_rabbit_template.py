@@ -63,6 +63,12 @@ class InProcessRabbitTemplate(RabbitTemplate):
         self.sent: list[SentMessage] = []
         self.refused: list[RefusedMessage] = []
 
+    def clear(self) -> None:
+        """Forgets every sent and refused message, as a test that keeps its application does before the next test."""
+        with self._lock:
+            self.sent.clear()
+            self.refused.clear()
+
     @property
     def dead_lettered(self) -> list[RefusedMessage]:
         """Every refused message that a dead-letter queue would keep, in the order they were refused."""

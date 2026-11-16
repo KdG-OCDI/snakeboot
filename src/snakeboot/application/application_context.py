@@ -9,6 +9,7 @@ import wireup
 from wireup import SyncContainer
 from wireup.errors import WireupError
 
+from snakeboot.application.container_start_up import remember_which_components_are_async
 from snakeboot.application.logging_configuration import configure_logging
 from snakeboot.component_scan import ComponentScan, MarkedMethod, application_package
 from snakeboot.configuration import (
@@ -51,6 +52,8 @@ OPTIONAL_SECTIONS: Final = (
 
 type ConditionalModules = Mapping[type[Section], tuple[str, ...]]
 """Which modules join the container when the configuration has which table, like `@ConditionalOnProperty`."""
+
+remember_which_components_are_async()
 
 
 def component_scan_of(
@@ -173,6 +176,15 @@ class ApplicationContext(ApplicationComponents):
         except WireupError as error:
             raise LookupError(f"The container has no {name} to replace: {error}") from error
 
+    def install_transactions(self) -> None:
+        """Makes this application's `TransactionManager` the one of every `@transactional` call, with `[database]`.
+
+        `refresh` does it; a process that keeps several started applications, as the tests do, calls it for the one
+        that runs next.
+        """
+        if DatabaseProperties in self.configuration.sections:
+            TransactionManagerRegistry.install(self.get(TransactionManager))
+
     def close(self) -> None:
         """Closes the container, which releases what its components hold (the database's connections, for one)."""
         if self._container is not None:
@@ -202,8 +214,7 @@ class ApplicationContext(ApplicationComponents):
     def _finish_refresh(self, overrides: Mapping[Any, object], prepare: Callable[[Self], None] | None) -> None:
         for component_type, replacement in overrides.items():
             self.replace_component(component_type, replacement)
-        if DatabaseProperties in self.configuration.sections:
-            TransactionManagerRegistry.install(self.get(TransactionManager))
+        self.install_transactions()
         if prepare is not None:
             prepare(self)
         self._register_listeners()

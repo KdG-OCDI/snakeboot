@@ -624,9 +624,16 @@ redis_url = "redis://redis:6379/1"` (extra `snakeboot[cache]`) it is Redis; a te
 self._cache.put(question, {"text": answer, "sources": sources}, time_to_live=timedelta(hours=1))
 ```
 
-**Tests.** `@application_test` is `@SpringBootTest`: every test it marks gets the application, started anew, and the
+**Tests.** `@application_test` is `@SpringBootTest`: every test it marks gets the started application and the
 components it asks for by type. A test component replaces a component in every test, like a `@TestComponent` with
 `@Primary`; a `MockComponent` replaces one for a single test, like `@MockitoBean`.
+
+Tests that ask the same application (the same profile, properties, database, slice, mocks, spies and test
+components) share one start of it, like Spring's test context cache; the run keeps at most 32. Between two tests
+snakeboot resets what it made for the test: the database is again what the migrations built, the cache and the
+published events are empty, every mock and spy forgets its answers and its calls, and every test component is built
+anew. What a component of the application itself keeps in memory, it cannot reset: a test that changes such a thing
+is marked `@dirties_application`, like `@DirtiesContext`, and the next test starts the application anew.
 
 ```python
 # tests/doubles/fixed_clock.py

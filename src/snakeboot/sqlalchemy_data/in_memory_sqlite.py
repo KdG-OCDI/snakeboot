@@ -6,7 +6,7 @@ from collections.abc import Iterable, Sequence
 from typing import TYPE_CHECKING, Any, Final, cast, override
 from uuid import UUID
 
-from sqlalchemy import Connection, Dialect, StaticPool, Uuid, create_engine
+from sqlalchemy import Connection, Dialect, Engine, StaticPool, Uuid, create_engine
 from sqlalchemy.dialects import registry
 from sqlalchemy.dialects.sqlite.pysqlite import SQLiteDialect_pysqlite
 from sqlalchemy.exc import DBAPIError
@@ -108,25 +108,44 @@ def in_memory_database(entity_types: Iterable[type] = (), *, migrations: Sequenc
     """
     mapping = EntityMapping.of(entity_types)
     if not mapping.entity_types and not migrations:
-        return _empty_database()
+        return _InMemoryDatabase(template=None)
     found = migrations_in(migration_locations(mapping.entity_types)) if migrations is None else migrations
-    return _copy_of(_TEMPLATES.template_for(mapping, found))
+    return _InMemoryDatabase(_TEMPLATES.template_for(mapping, found))
 
 
 def _empty_database() -> Database:
+    return Database(_engine_in_memory())
+
+
+def _engine_in_memory() -> Engine:
     engine = create_engine(
         "sqlite+snakeboot_test://", connect_args={"check_same_thread": False}, poolclass=OneThreadAtATimePool
     )
     open_transactions_with_sqlalchemy(engine, begin="BEGIN")
-    return Database(engine)
+    return engine
 
 
-def _copy_of(template: Database) -> Database:
-    """A fresh database with what `template` holds, copied by SQLite's backup: quicker than creating the tables."""
-    database = _empty_database()
-    with template.engine.connect() as source, database.engine.connect() as target:
-        _sqlite3_of(source).backup(_sqlite3_of(target))
-    return database
+class _InMemoryDatabase(Database):
+    """The SQLite in memory of a test: a copy of `template`, or empty without one."""
+
+    def __init__(self, template: Database | None) -> None:
+        super().__init__(_engine_in_memory())
+        self._template = template
+        if template is not None:
+            self.restore()
+
+    def restore(self) -> None:
+        """Puts back what the template holds, and nothing else: an application kept for the next test starts it on
+        the database the first one started on. Copied by SQLite's backup, quicker than creating the tables."""
+        if self._template is None:
+            self._copy_from(sqlite3.connect(":memory:"))
+            return
+        with self._template.engine.connect() as source:
+            self._copy_from(_sqlite3_of(source))
+
+    def _copy_from(self, source: sqlite3.Connection) -> None:
+        with self.engine.connect() as target:
+            source.backup(_sqlite3_of(target))
 
 
 class _Templates:

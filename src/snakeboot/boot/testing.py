@@ -3,7 +3,7 @@ from dataclasses import dataclass
 from importlib import import_module
 from types import ModuleType, TracebackType
 from typing import TYPE_CHECKING, Any, Final, Self, cast, override
-from unittest.mock import Mock
+from unittest.mock import Mock, NonCallableMock
 
 import wireup
 from wireup.errors import WireupError
@@ -33,6 +33,7 @@ from snakeboot.testing.environment import TestEnvironment
 from snakeboot.testing.published_events import PublishedEvents
 from snakeboot.testing.signed_in_tokens import signed_in_principal
 from snakeboot.testing.slices import ApplicationSlice, ModuleSlice, WebSlice
+from snakeboot.transaction import TransactionManagerRegistry
 
 if TYPE_CHECKING:
     from httpx2 import Response
@@ -209,16 +210,40 @@ class TestApplication:
             self._server = LocalServer.start(self._asgi_application(also_allowed_hosts=(LOOPBACK, "localhost")))
         return self._server
 
+    def reset(self) -> None:
+        """Returns the application to how it started and sets it aside, for a later test to `resume`.
+
+        Like the test context Spring keeps between tests, but emptied here: its server stops, the database is again
+        what the migrations built, the cache and `published_events` are empty, and every mock and spy forgets its
+        calls and its answers. What a component of the application keeps in its own fields stays. Until `resume`,
+        `@transactional` is no longer this application's.
+        """
+        self._stop_server()
+        TransactionManagerRegistry.uninstall()
+        self.published_events.clear()
+        for double in self._replacements.values():
+            if isinstance(double, NonCallableMock):
+                double.reset_mock(return_value=True, side_effect=True)
+        _start_afresh(self._owned)
+
+    def resume(self) -> None:
+        """Makes `@transactional` this application's again, after `reset` or after another application ran."""
+        self._context.install_transactions()
+
     def close(self) -> None:
         """Stops its server, closes the container and what it holds, and the database of the test."""
         try:
-            if self._server is not None:
-                self._server.stop()
+            self._stop_server()
         finally:
             try:
                 self._context.close()
             finally:
                 _close(self._owned)
+
+    def _stop_server(self) -> None:
+        server, self._server = self._server, None
+        if server is not None:
+            server.stop()
 
     def __enter__(self) -> Self:
         """Returns the started application, which the end of the `with` block closes."""
@@ -452,6 +477,16 @@ def _close(services: Iterable[object]) -> None:
         close = getattr(service, "close", None)
         if callable(close):
             close()
+
+
+def _start_afresh(services: Iterable[object]) -> None:
+    """Empties what a test made for itself: the database goes back to what the migrations built (`restore`), the
+    cache and the broker in this process forget (`clear`)."""
+    for service in services:
+        for name in ("clear", "restore"):
+            empty = getattr(service, name, None)
+            if callable(empty):
+                empty()
 
 
 def _replaced_where_present(

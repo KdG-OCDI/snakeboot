@@ -1,4 +1,4 @@
-"""`@application_test` starts the notebook anew for every test and hands each test what it asks for, by type.
+"""`@application_test` starts the notebook and hands each test what it asks for, by type.
 
 These tests run through snakeboot's pytest plugin, as an application's tests do. The application is named: the source
 of snakeboot's own tests holds many. `test_plugin_in_a_project.py` checks that a project with one finds it alone.

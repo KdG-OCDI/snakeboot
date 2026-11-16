@@ -89,8 +89,13 @@ class _PostgreSQLServer:
     def copy_of(self, template: str) -> Database:
         """Returns a database of its own for one test, copied from `template`."""
         name = f"test_{uuid4().hex}"
+        self.copy(template, name)
+        return _CopiedDatabase(self, name, template)
+
+    def copy(self, template: str, name: str) -> None:
+        """Makes the database `name` a copy of `template`, in place of what it was."""
+        self.drop(name)
         self._execute(f'CREATE DATABASE "{name}" TEMPLATE "{template}"')
-        return _CopiedDatabase(self, name)
 
     def url_of(self, name: str) -> URL:
         """Returns the URL of the database `name` on this server."""
@@ -136,12 +141,19 @@ class _PostgreSQLServer:
 
 
 class _CopiedDatabase(Database):
-    """The copy of a template that one test runs on; closing it drops the copy."""
+    """The copy of a template that a test runs on; closing it drops the copy."""
 
-    def __init__(self, server: _PostgreSQLServer, name: str) -> None:
+    def __init__(self, server: _PostgreSQLServer, name: str, template: str) -> None:
         super().__init__(create_engine(server.url_of(name)))
         self._server = server
         self._name = name
+        self._template = template
+
+    def restore(self) -> None:
+        """Copies the template anew, and nothing else: an application kept for the next test starts it on the
+        database the first one started on. Its connections close first; the pool opens new ones when asked."""
+        super().close()
+        self._server.copy(self._template, self._name)
 
     @override
     def close(self) -> None:

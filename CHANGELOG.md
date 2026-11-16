@@ -3,6 +3,25 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.14,<0.15`.
 
+## Unreleased
+
+- Tests that ask the same application share one start of it, like Spring's test context cache (#17). The pytest
+  plugin keeps a started application per set-up (application, profile, properties, database, slice, mocks, spies,
+  test components), at most 32, and resets it between two tests: the database is again what the migrations built,
+  the cache, the published events and the broker in this process are empty, mocks and spies forget their answers
+  and calls, and every test component is built anew, in place. `TestApplication.reset()` and `resume()` do the same
+  for a test that starts its application itself.
+- **Breaking, in tests:** what a component of the application itself keeps in memory now reaches the next test. A
+  test that changes such a thing is marked `@dirties_application`, like `@DirtiesContext`: the application closes
+  after it, and the next test starts it anew. A test component is rebuilt by calling its `__init__` again on the
+  same object.
+- An application starts quicker: wireup 2.13 walks the dependencies of every component again wherever another
+  shares them (maldoinc/wireup#154), three quarters of the start of an application of some three hundred
+  components. snakeboot makes it decide once per component, for wireup 2.13 only; another version is left as it is.
+- `InMemoryCache.clear()` and `InProcessRabbitTemplate.clear()` forget what they hold.
+- `ApplicationContext.install_transactions()` makes an application's `TransactionManager` the one of `@transactional`
+  again, for a process that keeps several started applications.
+
 ## 0.14.0
 
 - `snakeboot.stereotype`: an application declares its components in snakeboot's terms, like the annotations of
