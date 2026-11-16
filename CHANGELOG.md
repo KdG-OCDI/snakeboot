@@ -1,9 +1,9 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.14,<0.15`.
+a minor release may break the API: pin `snakeboot>=0.15,<0.16`.
 
-## Unreleased
+## 0.15.0
 
 - Tests that ask the same application share one start of it, like Spring's test context cache (#17). The pytest
   plugin keeps a started application per set-up (application, profile, properties, database, slice, mocks, spies,
