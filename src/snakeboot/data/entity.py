@@ -226,14 +226,14 @@ class Property:
 @dataclass(frozen=True, slots=True)
 class EntityDescription:
     """What `@entity` declared: the class, its table, its properties in field order, its identifier, its indexes, its
-    unique constraints, and the mark of the methods without which its table is no part of the schema."""
+    unique constraints, and the marks of the methods or classes without which its table is no part of the schema."""
 
     entity_type: type
     table: str
     properties: tuple[Property, ...]
     indexes: tuple[Index, ...]
     unique_constraints: tuple[UniqueConstraint, ...]
-    needed_by: str | None = None
+    needed_by: str | tuple[str, ...] | None = None
 
     @property
     def identifier(self) -> Property:
@@ -255,7 +255,7 @@ def entity[C: type](
     *,
     indexes: tuple[Index, ...] = (),
     unique_constraints: tuple[UniqueConstraint, ...] = (),
-    needed_by: str | None = None,
+    needed_by: str | tuple[str, ...] | None = None,
 ) -> Callable[[C], C]:
     """Declares a dataclass whose objects a table keeps, like JPA's `@Entity` with `@Table(name = table, indexes = ...,
     uniqueConstraints = ...)`.
@@ -282,7 +282,8 @@ def entity[C: type](
     the mark a decorator leaves on the methods that use it. The table is part of the schema (what the migrations must
     build in a test, what `make_migration` writes) only when a method of the application carries that mark, as a
     starter's table comes with its starter in Spring Boot. snakeboot's own tables declare it: the event publication
-    registry's is needed by `@application_module_listener` methods, the scheduler locks' by `@scheduler_lock` ones.
+    registry's is needed by `@application_module_listener` methods and `@externalized` classes (a tuple names several
+    marks, of methods or of classes), the scheduler locks' by `@scheduler_lock` methods.
     """
 
     def declare(entity_type: C) -> C:
@@ -309,7 +310,7 @@ def _describe(
     *,
     indexes: tuple[Index, ...],
     unique_constraints: tuple[UniqueConstraint, ...],
-    needed_by: str | None,
+    needed_by: str | tuple[str, ...] | None,
 ) -> EntityDescription:
     if not dataclasses.is_dataclass(entity_type):
         raise InvalidEntityError(f"@entity marks a dataclass: put @dataclass under @entity on {entity_type.__name__}.")

@@ -1,4 +1,4 @@
-"""On PostgreSQL: the scheduler locks, the event publication registry and optimistic locking, as SQLite cannot show.
+"""On PostgreSQL: the scheduler locks, the event publication registry, the stream offsets and optimistic locking.
 
 Set SNAKEBOOT_TEST_POSTGRESQL_URL as for `test_postgresql.py`.
 """
@@ -17,6 +17,9 @@ from snakeboot.event_publication import (
     EventPublicationRecord,
     EventPublicationRecords,
     PersistentEventPublicationRegistry,
+    RepositoryStreamOffsets,
+    StreamOffsetRecord,
+    StreamOffsetRecords,
 )
 from snakeboot.scheduler_lock import RepositorySchedulerLockProvider, SchedulerLockRecord, SchedulerLockRecords
 from snakeboot.scheduling import SchedulerLockMapping
@@ -30,7 +33,7 @@ URL = os.environ.get("SNAKEBOOT_TEST_POSTGRESQL_URL", "")
 
 pytestmark = pytest.mark.skipif(not URL, reason="SNAKEBOOT_TEST_POSTGRESQL_URL names no PostgreSQL")
 
-ENTITIES = (EventPublicationRecord, SchedulerLockRecord, WorkshopRecord)
+ENTITIES = (EventPublicationRecord, SchedulerLockRecord, StreamOffsetRecord, WorkshopRecord)
 
 
 @dataclass(frozen=True)
@@ -116,6 +119,26 @@ def test_a_publication_keeps_its_event_as_jsonb_and_reads_it_back(database: Data
             {"id": stored.identifier},
         ).scalar_one()
     assert kind == "object"
+
+
+def test_a_stream_offset_commits_and_rolls_back_with_the_projection(database: Database) -> None:
+    offsets = RepositoryStreamOffsets(repository(StreamOffsetRecords, database))
+    workshops = repository(WorkshopRecords, database)
+
+    def project(workshop_id: str, offset: int, *, fails: bool = False) -> None:
+        with database.transaction():
+            workshops.save(WorkshopRecord(workshop_id, "Clean Code"))
+            offsets.handled("myapp.Projection.on_event", offset)
+            if fails:
+                raise RuntimeError("The projection fails.")
+
+    project("w1", 2**40)
+    with pytest.raises(RuntimeError):
+        project("w2", 2**40 + 1, fails=True)
+
+    assert offsets.last_handled("myapp.Projection.on_event") == 2**40
+    assert [workshop.id for workshop in workshops.find_all()] == ["w1"]
+    assert offsets.last_handled("myapp.Other.on_event") is None
 
 
 def test_saving_a_stale_entity_is_refused(database: Database) -> None:

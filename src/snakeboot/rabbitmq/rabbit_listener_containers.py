@@ -17,7 +17,7 @@ from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.lifecycle import Lifecycle
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.rabbitmq.listener_declaration import AmqpDeclarationError, declare_listener_queue
-from snakeboot.rabbitmq.message_conversion import MessageConversionError, body_reader
+from snakeboot.rabbitmq.message_conversion import BodyReader, MessageConversionError, body_reader
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener import (
     RABBIT_LISTENER_MAPPING_ATTRIBUTE,
@@ -147,7 +147,7 @@ class RabbitListenerContainers(Lifecycle, component=False):
             for endpoint in endpoints:
                 declare_listener_queue(channel, endpoint.name, endpoint.mapping)
         finally:
-            _close_quietly(connection)
+            close_quietly(connection)
 
     def _thread_for(self, endpoint: RabbitListenerEndpoint) -> threading.Thread:
         consumer = _Consumer(endpoint, self._connection_factory, timing=self._timing, stopping=self._stopping)
@@ -171,6 +171,28 @@ def rabbit_listener_endpoints(
 def _endpoint_of(
     marked: MarkedMethod[RabbitListenerMapping], components: ApplicationComponents, task_decorator: TaskDecorator
 ) -> RabbitListenerEndpoint:
+    listener = bound_listener(marked, components)
+
+    def receive(body: bytes) -> None:
+        task_decorator.decorate(partial(listener.handle, listener.read(body)))()
+
+    return RabbitListenerEndpoint(marked.name, marked.mapping, receive)
+
+
+@dataclass(frozen=True, slots=True)
+class BoundListener:
+    """A listener method bound to its component, and what turns a body into the message it takes."""
+
+    handle: Callable[[object], None]
+    read: BodyReader
+
+
+def bound_listener[M](marked: MarkedMethod[M], components: ApplicationComponents) -> BoundListener:
+    """Binds a listener method to its component; one that cannot receive as declared stops the start-up here.
+
+    Refused: an async method, one that does not take exactly one message, one whose message is no pydantic model,
+    `dict` or `bytes`, and one of a class that is no component.
+    """
     method = marked.method
     if inspect.iscoroutinefunction(method):
         raise InvalidRabbitListenerError(f"{marked.name} is async; listeners are synchronous.")
@@ -184,12 +206,7 @@ def _endpoint_of(
         raise InvalidRabbitListenerError(
             f"{marked.name} listens, but {marked.owner.__qualname__} is no component: add @component."
         ) from error
-    handle: Callable[[object], None] = getattr(component, method.__name__)
-
-    def receive(body: bytes) -> None:
-        task_decorator.decorate(partial(handle, read(body)))()
-
-    return RabbitListenerEndpoint(marked.name, marked.mapping, receive)
+    return BoundListener(getattr(component, method.__name__), read)
 
 
 class _Consumer:
@@ -237,7 +254,7 @@ class _Consumer:
             while not self._stopping.is_set():
                 connection.process_data_events(time_limit=self._timing.poll_seconds)
         finally:
-            _close_quietly(connection)
+            close_quietly(connection)
 
     def _on_message(self, channel: Any, delivery: Any, properties: Any, body: bytes) -> None:  # noqa: PLR0917  # reason: pika calls it with four positional arguments
         # The message continues the trace of whoever sent it, like Spring AMQP's observation.
@@ -283,16 +300,9 @@ class _Consumer:
         return _Outcome.DONE
 
     def _paused_until_stopping(self, connection: Any, seconds: float) -> bool:
-        """Waits `seconds` before the next attempt, or until told to stop, and tells whether it must stop.
-
-        The connection sleeps instead of the thread, in slices, so it keeps answering the broker's heartbeats: the
-        broker closes a connection that stays silent longer than the heartbeat timeout and puts the message back on
-        the queue, where its attempts start over.
-        """
-        deadline = time.monotonic() + seconds
-        while not self._stopping.is_set() and (left := deadline - time.monotonic()) > 0:
-            connection.sleep(min(left, self._timing.poll_seconds))
-        return self._stopping.is_set()
+        return paused_until_stopping(
+            connection, seconds, stopping=self._stopping, poll_seconds=self._timing.poll_seconds
+        )
 
 
 class _Outcome(Enum):
@@ -301,7 +311,21 @@ class _Outcome(Enum):
     HAND_BACK = "reject back to the queue"
 
 
-def _close_quietly(connection: Any) -> None:
+def paused_until_stopping(connection: Any, seconds: float, *, stopping: threading.Event, poll_seconds: float) -> bool:
+    """Waits `seconds` before the next attempt, or until `stopping` is set, and tells whether it must stop.
+
+    The connection sleeps instead of the thread, in slices, so it keeps answering the broker's heartbeats: the
+    broker closes a connection that stays silent longer than the heartbeat timeout and puts the message back on
+    the queue, where its attempts start over.
+    """
+    deadline = time.monotonic() + seconds
+    while not stopping.is_set() and (left := deadline - time.monotonic()) > 0:
+        connection.sleep(min(left, poll_seconds))
+    return stopping.is_set()
+
+
+def close_quietly(connection: Any) -> None:
+    """Closes `connection`, unless the broker went away and nothing is left to close."""
     if connection.is_open:
         with contextlib.suppress(AMQPError):  # the broker went away; nothing is left to close
             connection.close()

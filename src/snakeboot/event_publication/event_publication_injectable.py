@@ -1,7 +1,8 @@
 """Registers the event publication registry and its resubmitter with wireup.
 
 `snakeboot.boot` adds this module, and the one of its table, to the container when the application has `[database]`,
-like Spring Modulith's JDBC starter: the `@application_module_listener` methods then receive their events at least once.
+like Spring Modulith's JDBC starter: the `@application_module_listener` methods then receive their events at least once,
+and the stream listeners keep how far they read in the transaction of what they built from it.
 """
 
 from typing import Annotated
@@ -14,7 +15,8 @@ from snakeboot.event_publication.event_publication_record import EventPublicatio
 from snakeboot.event_publication.event_publication_resubmitter import EventPublicationResubmitter
 from snakeboot.event_publication.persistent_event_publication_registry import PersistentEventPublicationRegistry
 from snakeboot.event_publication.publication_timing import PublicationTiming
-from snakeboot.events import ApplicationEventPublisher, EventPublicationRegistry
+from snakeboot.event_publication.stream_offset_record import RepositoryStreamOffsets, StreamOffsetRecords
+from snakeboot.events import ApplicationEventPublisher, EventPublicationRegistry, StreamOffsets
 from snakeboot.lifecycle import Lifecycle
 
 
@@ -41,3 +43,9 @@ def event_publication_resubmitter(
 ) -> Lifecycle:
     """Provides what delivers the failed and the lost publications again while the application runs."""
     return EventPublicationResubmitter(publisher, registry, meters, every=timing.resubmit_every)
+
+
+@injectable(as_type=StreamOffsets)
+def stream_offsets(records: StreamOffsetRecords) -> StreamOffsets:
+    """Provides the offsets of the stream listeners, in the application's database."""
+    return RepositoryStreamOffsets(records)

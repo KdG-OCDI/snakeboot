@@ -49,6 +49,8 @@ applications. The one library an application does share with snakeboot is Pydant
 | `[events]`, `EventsProperties` | `spring.modulith.events.*` | `snakeboot[data]` |
 | `@scheduler_lock` | ShedLock's `@SchedulerLock` | `snakeboot[data]` |
 | `@rabbit_listener`, `RabbitTemplate`, `RejectAndDontRequeueError` | `@RabbitListener`, `RabbitTemplate`, `AmqpRejectAndDontRequeueException` | `snakeboot[rabbitmq]` |
+| `@externalized("exchange::key")` | Spring Modulith's `@Externalized`, event externalization for AMQP | `snakeboot[rabbitmq]`; `snakeboot[data]` for the outbox |
+| `@rabbit_stream_listener`, `StreamOffsets` | a RabbitMQ stream consumer, like a Kafka consumer with committed offsets | `snakeboot[rabbitmq]`; `snakeboot[data]` for the offsets |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
 | `@application_test`, `Autowired`, `@test_component`, `TestApplication` | `@SpringBootTest`, `@Autowired`, `@TestComponent` with `@Primary`, `@AutoConfigureTestDatabase`, `TestRestTemplate` | `snakeboot[testing]` |
 | `MockComponent`, `SpyComponent`, `when`, `verify` | `@MockitoBean`, `@MockitoSpyBean`, Mockito's `when` and `verify` | `snakeboot[testing]` |
@@ -535,6 +537,23 @@ class InvoiceOnOrderPlaced:
     def create_invoice(self, event: OrderPlaced) -> None: ...
 ```
 
+**Externalized events.** An event that other services need goes to the broker as well, like Spring Modulith's
+`@Externalized`: `@externalized("exchange::routing-key")` on its class. With `[rabbitmq]`, an
+`@application_module_listener` of snakeboot's own (`EventExternalizer`) sends every such event as JSON to the topic
+exchange, once the publisher's transaction committed. With `[database]` the publication waits in the outbox until the
+broker confirmed the message, so the event reaches RabbitMQ at least once, also when the broker was down: no service
+reads another's database, and no service exports one. The listeners of the application hear the event as before. The
+class is a dataclass or a Pydantic model; another stops the start. Unlike Spring Modulith, an event published outside a
+transaction is sent at once instead of not at all (kept in no outbox), so an application without a database sends too.
+
+```python
+@externalized("auctions::auction.closed")
+@dataclass(frozen=True)
+class AuctionClosed:
+    auction_id: UUID
+    winning_bid: Decimal
+```
+
 **REST controllers.** Singleton classes with constructor injection. `ControllerScan` finds them in the modules of
 the component scan, the same modules that fill the container, and `snakeboot.fastapi_web` publishes their routes.
 A controller sees no request: an endpoint takes what the call carries (path and query parameters, a body as a
@@ -767,6 +786,32 @@ start-up with RabbitMQ's `PRECONDITION_FAILED` and two ways to migrate the queue
 rabbitmqctl set_policy tictactoe.game-started.dead-letter '^tictactoe\.game-started$' \
   '{"dead-letter-exchange": "", "dead-letter-routing-key": "tictactoe.game-started.dead-letter"}' --apply-to queues
 ```
+
+**Streams: projections from the history of events.** A queue forgets a message once a listener took it; a
+RabbitMQ stream keeps every message, like a Kafka topic, and every consumer reads it at its own pace.
+`@rabbit_stream_listener` reads one: the first time from its start, so a new service builds its projection of another
+service's events from their whole history, and from then on in real time. The method handles a message and saves its
+offset in one transaction: with `[database]` in `snakeboot_stream_offset` (which `make_migration` writes once the
+application has a stream listener), so after a restart it reads on from the next message, without a gap and without
+handling one twice; without a database the offset lives in memory, and the method rebuilds its in-memory projection
+from the start at every start. The offset belongs to the method, by its name: renaming it reads the stream again.
+
+```python
+@component
+class BidStatistics:                                  # the projection an AI component predicts from
+    def __init__(self, bids: BidRecords) -> None: ...
+
+    @rabbit_stream_listener(stream="auctions.history", exchange="auctions", routing_key="auction.#")
+    def on_auction_event(self, message: AuctionEvent) -> None: ...
+```
+
+The start-up declares the exchange, the stream (a durable queue of type `stream`) and the binding. A stream keeps only
+what reached it: declare it before the events it needs (start the consumer once, or put it in RabbitMQ's definitions),
+and limit it with a policy (`max-age`, `max-length-bytes`) or it is kept for ever. `RejectAndDontRequeueError`, or a body
+that cannot be converted, skips a message for good. Another failure is tried again as `[rabbitmq.listener.retry]`
+says; then the method stops reading and reads on from the same message after a while, so a projection never misses
+one. `[rabbitmq.listener] auto_startup = false` keeps a process from reading. In a test, the `InProcessRabbitTemplate`
+hands every message the exchange routes to a stream to its stream listeners, with the next offset of that stream.
 
 **Health and metrics.** Like Spring Boot's actuator, the server answers beside the API, without a token:
 `/health/liveness` is UP while the process answers (Kubernetes's livenessProbe); `/health` and `/health/readiness`

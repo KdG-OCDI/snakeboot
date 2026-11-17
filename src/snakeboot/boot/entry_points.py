@@ -26,6 +26,7 @@ CONDITIONAL_MODULES: Final[ConditionalModules] = {
         "snakeboot.sqlalchemy_data.migration_commands",
         "snakeboot.event_publication.event_publication_record",
         "snakeboot.event_publication.event_publication_injectable",
+        "snakeboot.event_publication.stream_offset_record",
         "snakeboot.scheduler_lock.scheduler_lock_record",
         "snakeboot.scheduler_lock.scheduler_lock_injectable",
     ),
@@ -35,8 +36,8 @@ CONDITIONAL_MODULES: Final[ConditionalModules] = {
 """Which binding joins the container for which table, like Spring Boot's conditional auto-configuration.
 
 `[server]` brings `serve`. `[database]` brings the event publication registry of the `@application_module_listener`
-methods and the locks of `@scheduler_lock` with it. An application without `[database]` imports no SQLAlchemy, one
-without `[rabbitmq]` no pika, one without `[cache]` no Redis client.
+methods, the offsets of the stream listeners and the locks of `@scheduler_lock` with it. An application without
+`[database]` imports no SQLAlchemy, one without `[rabbitmq]` no pika, one without `[cache]` no Redis client.
 """
 
 APPLICATION_VARIABLE: Final = "SNAKEBOOT_APPLICATION"

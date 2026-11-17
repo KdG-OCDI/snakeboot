@@ -3,6 +3,19 @@
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
 a minor release may break the API: pin `snakeboot>=0.17,<0.18`.
 
+## 0.18.0 (unreleased)
+
+- `@externalized("exchange::key")` on an event class sends its events to RabbitMQ as well, like Spring Modulith's
+  `@Externalized`: through the event publication registry, after the commit, so they reach the broker at least once.
+  The outbox table is part of the schema once the application has an `@externalized` event. Published outside a
+  transaction, the event is sent at once, kept in no outbox. `needed_by` of `@entity` takes several marks, of methods
+  or of classes.
+- `@rabbit_stream_listener(stream=..., exchange=..., routing_key=...)` reads a RabbitMQ stream: from its start, so a
+  service builds a projection from the whole history of another's events, then on from the last message it handled.
+  It saves the offset in the transaction that handled the message, in `snakeboot_stream_offset` with `[database]`, in
+  memory without one. A message that keeps failing is never skipped: the listener reads on from it after a while.
+  The `InProcessRabbitTemplate` hands messages to the stream listeners of a test.
+
 ## 0.17.0
 
 - **Breaking:** an `@application_module_listener` hears only an event published while a transaction runs, like Spring

@@ -11,6 +11,10 @@
         @application_module_listener(WorkshopCancelled)                 # Spring Modulith's @ApplicationModuleListener
         def refund(self, event: WorkshopCancelled) -> None: ...         # own thread, own transaction, at least once
 
+    @externalized("workshops::workshop.cancelled")                      # Spring Modulith's @Externalized: to a broker
+    @dataclass(frozen=True)
+    class WorkshopCancelled: ...
+
     # in a @transactional use case, after saving the aggregate:
     self._events.publish_all(workshop.pull_events())
 
@@ -36,6 +40,14 @@ from snakeboot.events.event_listener_markers import (
     transactional_event_listener,
 )
 from snakeboot.events.event_publication_registry import EventPublication, EventPublicationRegistry
+from snakeboot.events.externalized import (
+    ExternalizationTarget,
+    ExternalizedEvent,
+    InvalidExternalizationError,
+    externalization_target,
+    externalized,
+)
+from snakeboot.events.stream_offsets import InMemoryStreamOffsets, StreamOffsets
 from snakeboot.events.task_executor import SyncTaskExecutor, TaskExecutor, ThreadPoolTaskExecutor
 
 __all__ = [
@@ -44,13 +56,20 @@ __all__ = [
     "Delivery",
     "EventPublication",
     "EventPublicationRegistry",
+    "ExternalizationTarget",
+    "ExternalizedEvent",
+    "InMemoryStreamOffsets",
     "InvalidApplicationEventListenerError",
+    "InvalidExternalizationError",
     "ListenerMapping",
+    "StreamOffsets",
     "SyncTaskExecutor",
     "TaskExecutor",
     "ThreadPoolTaskExecutor",
     "application_event_listener",
     "application_module_listener",
     "event_listener",
+    "externalization_target",
+    "externalized",
     "transactional_event_listener",
 ]

@@ -7,6 +7,7 @@ from functools import partial
 from snakeboot.events.application_event_listener_registry import ApplicationEventListenerRegistry, ListenerMethod
 from snakeboot.events.event_listener_markers import Delivery
 from snakeboot.events.event_publication_registry import EventPublication, EventPublicationRegistry
+from snakeboot.events.externalized import ExternalizedEvent
 from snakeboot.events.task_executor import SyncTaskExecutor, TaskExecutor
 from snakeboot.tracing import TraceContext
 from snakeboot.transaction import TransactionManagerRegistry, after_commit
@@ -72,7 +73,9 @@ class ApplicationEventPublisher:
         added = self._listeners.register(listeners)
         asynchronous = [m for m in added if m.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT]
         if self._registry is not None and asynchronous:
-            self._registry.verify({event_type for m in asynchronous for event_type in m.mapping.event_types})
+            # The externalizer of a broker verifies the @externalized classes behind ExternalizedEvent itself.
+            kept = {event_type for m in asynchronous for event_type in m.mapping.event_types}
+            self._registry.verify(kept - {ExternalizedEvent})
 
     def publish(self, event: object) -> None:
         """Delivers `event` to every listener method for its type: at once, after the commit, or on its own."""

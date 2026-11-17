@@ -33,7 +33,7 @@ class FakeBroker:
     unreachable_attempts: int = 0
     lost_publishes: int = 0
     exchanges: dict[str, tuple[str, bool]] = field(default_factory=dict)
-    queues: dict[str, dict[str, str]] = field(default_factory=dict)
+    queues: dict[str, dict[str, object]] = field(default_factory=dict)
     bindings: set[tuple[str, str, str]] = field(default_factory=set)
     acked: list[int] = field(default_factory=list)
     rejected: list[tuple[int, bool]] = field(default_factory=list)
@@ -41,7 +41,7 @@ class FakeBroker:
     slept: list[float] = field(default_factory=list)
     connections: list["FakeConnection"] = field(default_factory=list)
     settled: threading.Event = field(default_factory=threading.Event)
-    _pending: "queue.Queue[tuple[str, bytes, dict[str, str] | None]]" = field(default_factory=queue.Queue)
+    _pending: "queue.Queue[tuple[str, bytes, dict[str, object] | None]]" = field(default_factory=queue.Queue)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def connect(self, _parameters: Any) -> "FakeConnection":
@@ -54,11 +54,11 @@ class FakeBroker:
             self.connections.append(connection)
             return connection
 
-    def deliver(self, queue_name: str, body: bytes, headers: dict[str, str] | None = None) -> None:
+    def deliver(self, queue_name: str, body: bytes, headers: dict[str, object] | None = None) -> None:
         """Puts a message, with its headers, on a queue, for the listener of that queue."""
         self._pending.put((queue_name, body, headers))
 
-    def next_delivery(self, timeout: float) -> tuple[str, bytes, dict[str, str] | None] | None:
+    def next_delivery(self, timeout: float) -> tuple[str, bytes, dict[str, object] | None] | None:
         """The next message for a consumer, or None after `timeout`."""
         try:
             return self._pending.get(timeout=timeout)
@@ -82,11 +82,12 @@ class FakeChannel:
         self.confirms = False
         self.prefetch = 0
         self.consumers: dict[str, Consumer] = {}
+        self.consumer_arguments: dict[str, dict[str, object]] = {}
 
     def exchange_declare(self, exchange: str, exchange_type: str, durable: bool) -> None:
         self._broker.exchanges[exchange] = (exchange_type, durable)
 
-    def queue_declare(self, queue: str, durable: bool, arguments: dict[str, str] | None = None) -> None:
+    def queue_declare(self, queue: str, durable: bool, arguments: dict[str, object] | None = None) -> None:
         assert durable
         declared = self._broker.queues.setdefault(queue, arguments or {})
         if declared != (arguments or {}):
@@ -101,8 +102,11 @@ class FakeChannel:
     def basic_qos(self, prefetch_count: int) -> None:
         self.prefetch = prefetch_count
 
-    def basic_consume(self, queue: str, on_message_callback: Consumer) -> None:
+    def basic_consume(
+        self, queue: str, on_message_callback: Consumer, arguments: dict[str, object] | None = None
+    ) -> None:
         self.consumers[queue] = on_message_callback
+        self.consumer_arguments[queue] = arguments or {}
 
     def basic_ack(self, delivery_tag: int) -> None:
         self._broker.settle(lambda: self._broker.acked.append(delivery_tag))

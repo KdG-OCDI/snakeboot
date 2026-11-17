@@ -5,10 +5,16 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, override
 
+from snakeboot.events import InMemoryStreamOffsets, StreamOffsets
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.rabbitmq.message_conversion import body_of
 from snakeboot.rabbitmq.rabbit_listener_containers import RabbitListenerEndpoint, rabbit_listener_endpoints
+from snakeboot.rabbitmq.rabbit_stream_listener_containers import (
+    RabbitStreamListenerEndpoint,
+    rabbit_stream_listener_endpoints,
+    stream_offsets_of,
+)
 from snakeboot.rabbitmq.rabbit_template import RabbitTemplate
 from snakeboot.transaction import TransactionManagerRegistry, after_commit
 
@@ -54,11 +60,18 @@ class InProcessRabbitTemplate(RabbitTemplate):
     fail the sender: the message lands in `refused`, with the error, after one attempt (the retries of
     `[rabbitmq.listener.retry]` are left out, so a test does not wait for them). What a listener with
     `dead_letter=True` refuses is also in `dead_lettered`, as its dead-letter queue would keep it.
+
+    A message the exchange routes to a stream gets the stream's next offset and reaches every
+    `@rabbit_stream_listener` method of that stream, each of which saves its offset; what one refuses lands in
+    `refused` too. A test does not replay a stream: each starts with empty streams.
     """
 
     def __init__(self, components: ApplicationComponents) -> None:  # the broker's connection factory is left out
         self._components = components
         self._endpoints: list[RabbitListenerEndpoint] | None = None
+        self._stream_endpoints: list[RabbitStreamListenerEndpoint] | None = None
+        self._offsets: StreamOffsets | None = None
+        self._stream_lengths: dict[str, int] = {}
         self._lock = threading.Lock()
         self.sent: list[SentMessage] = []
         self.refused: list[RefusedMessage] = []
@@ -68,6 +81,9 @@ class InProcessRabbitTemplate(RabbitTemplate):
         with self._lock:
             self.sent.clear()
             self.refused.clear()
+            self._stream_lengths.clear()
+            if isinstance(self._offsets, InMemoryStreamOffsets):
+                self._offsets.clear()
 
     @property
     def dead_lettered(self) -> list[RefusedMessage]:
@@ -98,9 +114,29 @@ class InProcessRabbitTemplate(RabbitTemplate):
                 endpoint.receive(message.body)
             except Exception as error:  # as with a broker, a failing listener never fails the sender
                 logger.warning("%s refused a message to %s", endpoint.name, message.routing_key, exc_info=True)
-                refused = RefusedMessage(message, endpoint.name, error, endpoint.mapping.dead_letter_queue)
-                with self._lock:
-                    self.refused.append(refused)
+                self._keep(RefusedMessage(message, endpoint.name, error, endpoint.mapping.dead_letter_queue))
+        self._append_to_streams(message)
+
+    def _append_to_streams(self, message: SentMessage) -> None:
+        by_stream: dict[str, list[RabbitStreamListenerEndpoint]] = {}
+        for endpoint in self._stream_listeners():
+            bound = endpoint.mapping.exchange == message.exchange
+            if bound and _routes(endpoint.mapping.routing_key, message.routing_key):
+                by_stream.setdefault(endpoint.mapping.stream, []).append(endpoint)
+        for stream, endpoints in by_stream.items():
+            with self._lock:
+                offset = self._stream_lengths.get(stream, 0)
+                self._stream_lengths[stream] = offset + 1
+            for endpoint in endpoints:
+                try:
+                    endpoint.receive(message.body, offset)
+                except Exception as error:  # as with a broker, a failing listener never fails the sender
+                    logger.warning("%s refused a message to %s", endpoint.name, message.routing_key, exc_info=True)
+                    self._keep(RefusedMessage(message, endpoint.name, error, None))
+
+    def _keep(self, refused: RefusedMessage) -> None:
+        with self._lock:
+            self.refused.append(refused)
 
     def _listeners(self) -> list[RabbitListenerEndpoint]:
         # Found at the first message, not when the application starts: their components then get the test's doubles.
@@ -108,6 +144,15 @@ class InProcessRabbitTemplate(RabbitTemplate):
             if self._endpoints is None:
                 self._endpoints = rabbit_listener_endpoints(self._components, self._components.get(TaskDecorator))
             return self._endpoints
+
+    def _stream_listeners(self) -> list[RabbitStreamListenerEndpoint]:
+        # Found at the first message, as the other listeners are: their components then get the test's doubles.
+        with self._lock:
+            if self._stream_endpoints is None:
+                self._offsets = stream_offsets_of(self._components)
+                decorator = self._components.get(TaskDecorator)
+                self._stream_endpoints = rabbit_stream_listener_endpoints(self._components, decorator, self._offsets)
+            return self._stream_endpoints
 
 
 def _routes(binding_key: str, routing_key: str) -> bool:

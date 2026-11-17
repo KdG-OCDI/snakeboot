@@ -7,9 +7,11 @@ from typing import Any, Final
 from pika.exceptions import ChannelClosedByBroker
 
 from snakeboot.rabbitmq.rabbit_listener import RabbitListenerMapping
+from snakeboot.rabbitmq.rabbit_stream_listener import RabbitStreamListenerMapping
 
 _PRECONDITION_FAILED: Final = 406
 _DEAD_LETTER_ARGUMENT: Final = "x-dead-letter"
+_QUEUE_TYPE: Final = "x-queue-type"
 
 
 class AmqpDeclarationError(RuntimeError):
@@ -30,6 +32,23 @@ def declare_listener_queue(channel: Any, listener: str, mapping: RabbitListenerM
         _declare(channel, mapping)
     except ChannelClosedByBroker as error:
         raise AmqpDeclarationError(_refusal(listener, mapping, error)) from error
+
+
+def declare_listener_stream(channel: Any, listener: str, mapping: RabbitStreamListenerMapping) -> None:
+    """Declares the durable topic exchange, the stream (a durable queue of type `stream`) and its binding.
+
+    Raises AmqpDeclarationError, naming `listener`, when RabbitMQ refuses one; RabbitMQ then closed the channel.
+    """
+    try:
+        channel.exchange_declare(exchange=mapping.exchange, exchange_type="topic", durable=True)
+        channel.queue_declare(queue=mapping.stream, durable=True, arguments={_QUEUE_TYPE: "stream"})
+        channel.queue_bind(queue=mapping.stream, exchange=mapping.exchange, routing_key=mapping.routing_key)
+    except ChannelClosedByBroker as error:
+        raise AmqpDeclarationError(
+            f"RabbitMQ refused what {listener} declares: {error.reply_text}. A queue that exists keeps its type: a "
+            f"stream cannot take the name of a classic queue, so name another stream, or delete the queue "
+            f"{mapping.stream} first."
+        ) from error
 
 
 def _declare(channel: Any, mapping: RabbitListenerMapping) -> None:
