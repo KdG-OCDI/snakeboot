@@ -76,10 +76,28 @@ class ClosedAuctionProjection:
 
     def __init__(self, records: ClosedAuctionRecords) -> None:
         self._records = records
+        self.handled = 0
 
     @rabbit_stream_listener(stream="auctions.history", exchange="auctions", routing_key="auction.#")
     def on_auction_event(self, message: AuctionClosedMessage) -> None:
-        """Keeps the winning bid of the auction; a negative one is refused for good."""
+        """Keeps the winning bid of the auction; a negative one is refused for good, and the auction `crash` meets a
+        database that fails after the record was saved."""
+        self.handled += 1
         if message.winning_bid < 0:
             raise RejectAndDontRequeueError("A winning bid is never negative.")
         self._records.save(ClosedAuctionRecord(message.auction_id, message.winning_bid))
+        if message.auction_id == "crash":
+            raise RuntimeError("The database fails.")
+
+
+@component
+class PaymentProjection:
+    """Reads the same stream with a routing key of its own: it hears no closed auction."""
+
+    def __init__(self) -> None:
+        self.heard: list[dict[str, object]] = []
+
+    @rabbit_stream_listener(stream="auctions.history", exchange="auctions", routing_key="payment.#")
+    def on_payment(self, message: dict[str, object]) -> None:
+        """Keeps the payment."""
+        self.heard.append(message)

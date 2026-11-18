@@ -31,7 +31,7 @@ from snakeboot.events.application_event_listener import (
     InvalidApplicationEventListenerError,
     application_event_listener,
 )
-from snakeboot.events.application_event_publisher import ApplicationEventPublisher
+from snakeboot.events.application_event_publisher import ApplicationEventPublisher, publication_in_hand
 from snakeboot.events.event_listener_markers import (
     Delivery,
     ListenerMapping,
@@ -41,8 +41,8 @@ from snakeboot.events.event_listener_markers import (
 )
 from snakeboot.events.event_publication_registry import EventPublication, EventPublicationRegistry
 from snakeboot.events.externalized import (
+    EventExternalization,
     ExternalizationTarget,
-    ExternalizedEvent,
     InvalidExternalizationError,
     externalization_target,
     externalized,
@@ -54,10 +54,10 @@ __all__ = [
     "ApplicationEventListener",
     "ApplicationEventPublisher",
     "Delivery",
+    "EventExternalization",
     "EventPublication",
     "EventPublicationRegistry",
     "ExternalizationTarget",
-    "ExternalizedEvent",
     "InMemoryStreamOffsets",
     "InvalidApplicationEventListenerError",
     "InvalidExternalizationError",
@@ -71,5 +71,6 @@ __all__ = [
     "event_listener",
     "externalization_target",
     "externalized",
+    "publication_in_hand",
     "transactional_event_listener",
 ]

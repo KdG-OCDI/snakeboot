@@ -1,5 +1,7 @@
 import threading
 from abc import ABC, abstractmethod
+from collections.abc import Iterator
+from contextlib import AbstractContextManager, contextmanager
 from typing import Final, override
 
 STREAM_CONSUMER_ATTRIBUTE: Final = "__snakeboot_stream_consumer__"
@@ -10,9 +12,10 @@ class StreamOffsets(ABC):
     """How far each consumer of a stream of events has read, like the offsets Kafka commits for a consumer group.
 
     A stream keeps every event, so a consumer chooses where it reads from: from the start, to build its projection of
-    the events from their history, and afterwards from the event after the last one it handled. The consumer saves
-    the offset of an event in the transaction that handled it, so after a restart it neither skips an event nor
-    handles one twice. `snakeboot.event_publication` keeps the offsets in the application's database.
+    the events from their history, and afterwards from the event after the last one it handled. The consumer claims
+    the offset of an event for the work that handles it, so after a restart it neither skips an event nor handles
+    one twice, and of the processes of one service that all read the stream, one handles each event.
+    `snakeboot.event_publication` keeps the offsets in the application's database.
     """
 
     @abstractmethod
@@ -20,8 +23,13 @@ class StreamOffsets(ABC):
         """Returns the offset of the last event `consumer` handled, or None when it handled none yet."""
 
     @abstractmethod
-    def handled(self, consumer: str, offset: int) -> None:
-        """Remembers, in the running transaction, that `consumer` handled the event at `offset`."""
+    def claiming(self, consumer: str, offset: int) -> AbstractContextManager[bool]:
+        """Claims `offset` for `consumer` around the work that handles its event, and tells whether to do that work.
+
+        It yields False when `consumer` handled that event or a later one already. The claim holds once the block
+        ends without an exception, in the running transaction; another process that claims an offset of the same
+        consumer meanwhile waits for it, and then finds the event handled.
+        """
 
 
 class InMemoryStreamOffsets(StreamOffsets):
@@ -41,9 +49,14 @@ class InMemoryStreamOffsets(StreamOffsets):
             return self._offsets.get(consumer)
 
     @override
-    def handled(self, consumer: str, offset: int) -> None:
-        with self._lock:
-            self._offsets[consumer] = offset
+    @contextmanager
+    def claiming(self, consumer: str, offset: int) -> Iterator[bool]:
+        last = self.last_handled(consumer)
+        claimed = last is None or last < offset
+        yield claimed
+        if claimed:  # not reached when the work raised: the event is handled again
+            with self._lock:
+                self._offsets[consumer] = max(offset, self._offsets.get(consumer, offset))
 
     def clear(self) -> None:
         """Forgets every offset, as a test that keeps its application does before the next test."""

@@ -9,7 +9,7 @@ from uuid import uuid4
 import pytest
 
 from snakeboot.rabbitmq import InProcessRabbitTemplate, MessageConversionError, RejectAndDontRequeueError
-from snakeboot.rabbitmq.in_process_rabbit_template import _routes
+from snakeboot.rabbitmq.topic_routing import routes
 from snakeboot.testing import Autowired, application_test, dirties_application
 from snakeboot.transaction import transactional
 from tests.pytest_testing.parcels.parcels import (
@@ -136,4 +136,4 @@ def test_the_message_of_a_transaction_that_rolls_back_reaches_no_listener(
     ],
 )
 def test_the_routing_of_a_topic_exchange(binding_key: str, routing_key: str, *, routed: bool) -> None:
-    assert _routes(binding_key, routing_key) is routed
+    assert routes(binding_key, routing_key) is routed

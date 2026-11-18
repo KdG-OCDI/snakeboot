@@ -1,10 +1,8 @@
 import contextlib
 import inspect
 import logging
-import math
 import threading
-import time
-from collections.abc import Callable, Iterator
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from functools import partial
@@ -17,50 +15,20 @@ from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.lifecycle import Lifecycle
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.rabbitmq.listener_declaration import AmqpDeclarationError, declare_listener_queue
-from snakeboot.rabbitmq.message_conversion import BodyReader, MessageConversionError, body_reader
+from snakeboot.rabbitmq.listener_timing import ListenerTiming
+from snakeboot.rabbitmq.message_attempts import Attempted, MessageAttempts
+from snakeboot.rabbitmq.message_conversion import BodyReader, body_reader
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener import (
     RABBIT_LISTENER_MAPPING_ATTRIBUTE,
     InvalidRabbitListenerError,
     RabbitListenerMapping,
-    RejectAndDontRequeueError,
 )
 from snakeboot.tracing import TRACEPARENT, TraceContext
 
 logger = logging.getLogger(__name__)
 
 _SELF_AND_MESSAGE: Final = 2
-
-
-@dataclass(frozen=True, slots=True)
-class ListenerTiming:
-    """How patiently a listener waits, like Spring AMQP's `recoveryInterval`, `shutdownTimeout` and Spring Boot's
-    `spring.rabbitmq.listener.simple.retry.*`, whose defaults the retry takes."""
-
-    reconnect_seconds: float = 5.0
-    """Between attempts to reach a broker that is down."""
-    attempts: int = 3
-    """How often a message whose handling fails is tried before it is refused for good (`max-attempts`)."""
-    retry_pause_seconds: float = 1.0
-    """The pause after the first failed attempt, so a database that is down is not asked again at once
-    (`initial-interval`)."""
-    retry_multiplier: float = 1.0
-    """How much longer each next pause is than the one before (`multiplier`): exponential back-off."""
-    max_retry_pause_seconds: float = math.inf
-    """The longest pause between two attempts (`max-interval`); no limit unless given, so a timing that only sets
-    `retry_pause_seconds` keeps that pause, however long."""
-    poll_seconds: float = 1.0
-    """How long a listener waits for messages before it checks whether it must stop."""
-    shutdown_seconds: float = 5.0
-    """How long `stop` waits for a listener to finish the message in hand."""
-
-    def retry_pauses(self) -> Iterator[float]:
-        """Yields the pause after each failed attempt, in seconds: the first, then each `retry_multiplier` times
-        longer, none longer than `max_retry_pause_seconds`."""
-        pause = self.retry_pause_seconds
-        while True:
-            yield min(pause, self.max_retry_pause_seconds)
-            pause = min(pause * self.retry_multiplier, self.max_retry_pause_seconds)
 
 
 @dataclass(frozen=True, slots=True)
@@ -268,60 +236,20 @@ class _Consumer:
             channel.basic_reject(delivery_tag=delivery.delivery_tag, requeue=outcome is _Outcome.HAND_BACK)
 
     def _handled(self, body: bytes, connection: Any) -> "_Outcome":
-        pauses = self._timing.retry_pauses()
-        for attempt in range(1, self._timing.attempts + 1):
-            pause = next(pauses)
-            if (outcome := self._attempt(body, attempt, pause=pause)) is not None:
-                return outcome
-            if self._paused_until_stopping(connection, pause):
+        attempts = MessageAttempts(self._endpoint.name, self._timing, self._stopping)
+        match attempts.run(partial(self._endpoint.receive, body), connection, "a message"):
+            case Attempted.DONE:
+                return _Outcome.DONE
+            case Attempted.STOPPED:
                 return _Outcome.HAND_BACK  # stopping: the next start, or another process, tries it again
-        return _Outcome.REFUSE
-
-    def _attempt(self, body: bytes, attempt: int, *, pause: float) -> "_Outcome | None":
-        name, attempts = self._endpoint.name, self._timing.attempts
-        try:
-            self._endpoint.receive(body)
-        except (MessageConversionError, RejectAndDontRequeueError) as error:
-            logger.warning("%s refused a message for good: %r", name, error)
-            return _Outcome.REFUSE
-        except Exception:
-            if attempt == attempts:
-                logger.exception("%s failed on a message %s times; it is refused for good", name, attempts)
+            case Attempted.REFUSED | Attempted.EXHAUSTED:
                 return _Outcome.REFUSE
-            logger.warning(
-                "%s failed on a message (attempt %s of %s); it tries again in %s s",
-                name,
-                attempt,
-                attempts,
-                pause,
-                exc_info=True,
-            )
-            return None
-        return _Outcome.DONE
-
-    def _paused_until_stopping(self, connection: Any, seconds: float) -> bool:
-        return paused_until_stopping(
-            connection, seconds, stopping=self._stopping, poll_seconds=self._timing.poll_seconds
-        )
 
 
 class _Outcome(Enum):
     DONE = "acknowledge"
     REFUSE = "reject for good"
     HAND_BACK = "reject back to the queue"
-
-
-def paused_until_stopping(connection: Any, seconds: float, *, stopping: threading.Event, poll_seconds: float) -> bool:
-    """Waits `seconds` before the next attempt, or until `stopping` is set, and tells whether it must stop.
-
-    The connection sleeps instead of the thread, in slices, so it keeps answering the broker's heartbeats: the
-    broker closes a connection that stays silent longer than the heartbeat timeout and puts the message back on
-    the queue, where its attempts start over.
-    """
-    deadline = time.monotonic() + seconds
-    while not stopping.is_set() and (left := deadline - time.monotonic()) > 0:
-        connection.sleep(min(left, poll_seconds))
-    return stopping.is_set()
 
 
 def close_quietly(connection: Any) -> None:

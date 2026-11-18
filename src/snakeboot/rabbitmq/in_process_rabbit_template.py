@@ -8,7 +8,8 @@ from typing import Any, override
 from snakeboot.events import InMemoryStreamOffsets, StreamOffsets
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.task_decorator import TaskDecorator
-from snakeboot.rabbitmq.message_conversion import body_of
+from snakeboot.rabbitmq.message_conversion import MessageConversionError, body_of
+from snakeboot.rabbitmq.rabbit_listener import RejectAndDontRequeueError
 from snakeboot.rabbitmq.rabbit_listener_containers import RabbitListenerEndpoint, rabbit_listener_endpoints
 from snakeboot.rabbitmq.rabbit_stream_listener_containers import (
     RabbitStreamListenerEndpoint,
@@ -16,6 +17,7 @@ from snakeboot.rabbitmq.rabbit_stream_listener_containers import (
     stream_offsets_of,
 )
 from snakeboot.rabbitmq.rabbit_template import RabbitTemplate
+from snakeboot.rabbitmq.topic_routing import routes
 from snakeboot.transaction import TransactionManagerRegistry, after_commit
 
 logger = logging.getLogger(__name__)
@@ -61,9 +63,12 @@ class InProcessRabbitTemplate(RabbitTemplate):
     `[rabbitmq.listener.retry]` are left out, so a test does not wait for them). What a listener with
     `dead_letter=True` refuses is also in `dead_lettered`, as its dead-letter queue would keep it.
 
-    A message the exchange routes to a stream gets the stream's next offset and reaches every
-    `@rabbit_stream_listener` method of that stream, each of which saves its offset; what one refuses lands in
-    `refused` too. A test does not replay a stream: each starts with empty streams.
+    A stream holds what the bindings of all its `@rabbit_stream_listener` methods route to it, each message with the
+    stream's next offset, and every method of the stream reads it, as on RabbitMQ: a method handles the messages its
+    own routing key matches and claims their offsets. What a method refuses for good lands in `refused`, and the
+    method skips it. Another failure lands there too, after one attempt, and the method then stalls, as it would on
+    RabbitMQ: it handles nothing more of its stream until the next test. A test does not replay a stream: each starts
+    with empty streams.
     """
 
     def __init__(self, components: ApplicationComponents) -> None:  # the broker's connection factory is left out
@@ -72,6 +77,7 @@ class InProcessRabbitTemplate(RabbitTemplate):
         self._stream_endpoints: list[RabbitStreamListenerEndpoint] | None = None
         self._offsets: StreamOffsets | None = None
         self._stream_lengths: dict[str, int] = {}
+        self._stalled: set[str] = set()
         self._lock = threading.Lock()
         self.sent: list[SentMessage] = []
         self.refused: list[RefusedMessage] = []
@@ -82,6 +88,7 @@ class InProcessRabbitTemplate(RabbitTemplate):
             self.sent.clear()
             self.refused.clear()
             self._stream_lengths.clear()
+            self._stalled.clear()
             if isinstance(self._offsets, InMemoryStreamOffsets):
                 self._offsets.clear()
 
@@ -107,7 +114,7 @@ class InProcessRabbitTemplate(RabbitTemplate):
         by_queue: dict[str, RabbitListenerEndpoint] = {}
         for endpoint in self._listeners():
             bound = endpoint.mapping.exchange == message.exchange
-            if bound and _routes(endpoint.mapping.routing_key, message.routing_key):
+            if bound and routes(endpoint.mapping.routing_key, message.routing_key):
                 by_queue.setdefault(endpoint.mapping.queue, endpoint)
         for endpoint in by_queue.values():
             try:
@@ -120,19 +127,30 @@ class InProcessRabbitTemplate(RabbitTemplate):
     def _append_to_streams(self, message: SentMessage) -> None:
         by_stream: dict[str, list[RabbitStreamListenerEndpoint]] = {}
         for endpoint in self._stream_listeners():
-            bound = endpoint.mapping.exchange == message.exchange
-            if bound and _routes(endpoint.mapping.routing_key, message.routing_key):
+            if endpoint.mapping.exchange == message.exchange:
                 by_stream.setdefault(endpoint.mapping.stream, []).append(endpoint)
         for stream, endpoints in by_stream.items():
+            if any(routes(endpoint.mapping.routing_key, message.routing_key) for endpoint in endpoints):
+                with self._lock:
+                    offset = self._stream_lengths.get(stream, 0)
+                    self._stream_lengths[stream] = offset + 1
+                for endpoint in endpoints:
+                    self._read_from_stream(endpoint, message, offset)
+
+    def _read_from_stream(self, endpoint: RabbitStreamListenerEndpoint, message: SentMessage, offset: int) -> None:
+        if endpoint.name in self._stalled or not routes(endpoint.mapping.routing_key, message.routing_key):
+            return
+        try:
+            endpoint.receive(message.body, offset)
+        except (MessageConversionError, RejectAndDontRequeueError) as error:  # skipped for good, as on RabbitMQ
+            logger.warning("%s refused a message to %s", endpoint.name, message.routing_key, exc_info=True)
+            self._keep(RefusedMessage(message, endpoint.name, error, None))
+            endpoint.skip(offset)
+        except Exception as error:  # the method stalls on it, as on RabbitMQ, and the sender never fails
+            logger.warning("%s failed on a message to %s", endpoint.name, message.routing_key, exc_info=True)
+            self._keep(RefusedMessage(message, endpoint.name, error, None))
             with self._lock:
-                offset = self._stream_lengths.get(stream, 0)
-                self._stream_lengths[stream] = offset + 1
-            for endpoint in endpoints:
-                try:
-                    endpoint.receive(message.body, offset)
-                except Exception as error:  # as with a broker, a failing listener never fails the sender
-                    logger.warning("%s refused a message to %s", endpoint.name, message.routing_key, exc_info=True)
-                    self._keep(RefusedMessage(message, endpoint.name, error, None))
+                self._stalled.add(endpoint.name)
 
     def _keep(self, refused: RefusedMessage) -> None:
         with self._lock:
@@ -153,17 +171,3 @@ class InProcessRabbitTemplate(RabbitTemplate):
                 decorator = self._components.get(TaskDecorator)
                 self._stream_endpoints = rabbit_stream_listener_endpoints(self._components, decorator, self._offsets)
             return self._stream_endpoints
-
-
-def _routes(binding_key: str, routing_key: str) -> bool:
-    """Tells whether a topic exchange routes `routing_key` to a queue bound with `binding_key`."""
-    return _words_match(binding_key.split("."), routing_key.split("."))
-
-
-def _words_match(pattern: list[str], words: list[str]) -> bool:
-    if not pattern:
-        return not words
-    head, rest = pattern[0], pattern[1:]
-    if head == "#":
-        return any(_words_match(rest, words[skipped:]) for skipped in range(len(words) + 1))
-    return bool(words) and head in {"*", words[0]} and _words_match(rest, words[1:])

@@ -43,7 +43,7 @@ def test_an_event_type_the_registry_cannot_keep_stops_the_start(application: Tes
 
     with pytest.raises(
         InvalidApplicationEventListenerError,
-        match="receives Unserializable, which the event publication registry cannot keep",
+        match="receives Unserializable, or it is @externalized, but the event publication registry cannot keep it",
     ):
         registry.verify([Unserializable])
 

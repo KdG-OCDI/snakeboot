@@ -31,6 +31,7 @@ registry (`EventExternalizer`), like Spring Modulith's event externalization.
 from snakeboot.rabbitmq.event_externalizer import EventExternalizer
 from snakeboot.rabbitmq.in_process_rabbit_template import InProcessRabbitTemplate, RefusedMessage, SentMessage
 from snakeboot.rabbitmq.listener_declaration import AmqpDeclarationError
+from snakeboot.rabbitmq.listener_timing import ListenerTiming
 from snakeboot.rabbitmq.message_conversion import MessageConversionError
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener import (
@@ -39,7 +40,7 @@ from snakeboot.rabbitmq.rabbit_listener import (
     RejectAndDontRequeueError,
     rabbit_listener,
 )
-from snakeboot.rabbitmq.rabbit_listener_containers import ListenerTiming, RabbitListenerContainers
+from snakeboot.rabbitmq.rabbit_listener_containers import RabbitListenerContainers
 from snakeboot.rabbitmq.rabbit_stream_listener import RabbitStreamListenerMapping, rabbit_stream_listener
 from snakeboot.rabbitmq.rabbit_stream_listener_containers import RabbitStreamListenerContainers
 from snakeboot.rabbitmq.rabbit_template import AmqpPublishError, RabbitTemplate

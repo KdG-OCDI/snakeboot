@@ -1,5 +1,5 @@
-"""Every `@rabbit_stream_listener` method reads its stream from where it stopped, and never skips a message it could
-not handle yet."""
+"""Every `@rabbit_stream_listener` method reads its stream from where it stopped, handles each message once, and never
+skips a message it could not handle yet."""
 
 import time
 from collections.abc import Callable, Iterator
@@ -61,12 +61,17 @@ def containers(
     containers.stop()
 
 
+def handled(offsets: InMemoryStreamOffsets, offset: int) -> None:
+    with offsets.claiming(CONSUMER, offset):
+        pass
+
+
 def bid(auction_id: str, amount: int = 10) -> bytes:
     return f'{{"auction_id": "{auction_id}", "amount": {amount}}}'.encode()
 
 
-def deliver(broker: FakeBroker, body: bytes, offset: int, **headers: object) -> None:
-    broker.deliver(STREAM, body, headers={"x-stream-offset": offset, **headers})
+def deliver(broker: FakeBroker, body: bytes, offset: int, routing_key: str = "auction.bid", **headers: object) -> None:
+    broker.deliver(STREAM, body, headers={"x-stream-offset": offset, **headers}, routing_key=routing_key)
 
 
 def settled(broker: FakeBroker) -> None:
@@ -84,6 +89,16 @@ def reading_channels(broker: FakeBroker) -> list[FakeChannel]:
     return [channel for connection in broker.connections for channel in connection.channels if channel.consumers]
 
 
+def subscriptions(broker: FakeBroker) -> list[dict[str, object]]:
+    """The arguments of every consumer the listener started, also of the ones RabbitMQ cancelled since."""
+    return [
+        channel.consumer_arguments[STREAM]
+        for connection in broker.connections
+        for channel in connection.channels
+        if STREAM in channel.consumer_arguments
+    ]
+
+
 def test_declares_a_durable_topic_exchange_a_stream_and_the_binding(
     containers: RabbitStreamListenerContainers, broker: FakeBroker
 ) -> None:
@@ -96,29 +111,41 @@ def test_declares_a_durable_topic_exchange_a_stream_and_the_binding(
     assert [channel.prefetch for channel in reading_channels(broker)] == [100]
 
 
+def test_a_stream_declared_with_a_retention_of_its_own_is_read_as_it_is(
+    containers: RabbitStreamListenerContainers, broker: FakeBroker, projection: BidProjection
+) -> None:
+    broker.queues[STREAM] = {"x-queue-type": "stream", "x-max-age": "7D"}  # as RabbitMQ's definitions declared it
+
+    containers.start()
+    deliver(broker, bid("a1"), offset=0)
+    settled(broker)
+
+    assert broker.queues[STREAM] == {"x-queue-type": "stream", "x-max-age": "7D"}
+    assert broker.bindings == {(STREAM, "auctions", "auction.#")}
+    assert [placed.auction_id for placed in projection.bids] == ["a1"]
+
+
 def test_a_listener_that_handled_nothing_reads_the_stream_from_its_start(
     containers: RabbitStreamListenerContainers, broker: FakeBroker
 ) -> None:
     containers.start()
     eventually(lambda: bool(reading_channels(broker)))
 
-    [channel] = reading_channels(broker)
-    assert channel.consumer_arguments[STREAM] == {"x-stream-offset": "first"}
+    assert subscriptions(broker) == [{"x-stream-offset": "first"}]
 
 
 def test_a_listener_reads_on_after_the_last_message_it_handled(
     containers: RabbitStreamListenerContainers, broker: FakeBroker, offsets: InMemoryStreamOffsets
 ) -> None:
-    offsets.handled(CONSUMER, 41)
+    handled(offsets, 41)
 
     containers.start()
     eventually(lambda: bool(reading_channels(broker)))
 
-    [channel] = reading_channels(broker)
-    assert channel.consumer_arguments[STREAM] == {"x-stream-offset": 42}
+    assert subscriptions(broker) == [{"x-stream-offset": 42}]
 
 
-def test_a_message_is_handled_acknowledged_and_its_offset_saved(
+def test_a_message_is_handled_acknowledged_and_its_offset_claimed(
     containers: RabbitStreamListenerContainers,
     broker: FakeBroker,
     projection: BidProjection,
@@ -133,6 +160,38 @@ def test_a_message_is_handled_acknowledged_and_its_offset_saved(
     assert broker.acked == [1]
     assert offsets.last_handled(CONSUMER) == 7
     assert decorator.runs == 2  # where it reads on, then the message
+
+
+def test_a_message_another_process_handled_already_is_acknowledged_and_left_alone(
+    containers: RabbitStreamListenerContainers,
+    broker: FakeBroker,
+    projection: BidProjection,
+    offsets: InMemoryStreamOffsets,
+) -> None:
+    containers.start()
+    eventually(lambda: bool(reading_channels(broker)))
+    handled(offsets, 3)  # another process of the service read on meanwhile
+
+    deliver(broker, bid("a1"), offset=3)
+    settled(broker)
+
+    assert projection.bids == []
+    assert broker.acked == [1]
+
+
+def test_a_message_the_routing_key_of_another_listener_put_in_the_stream_is_passed_over(
+    containers: RabbitStreamListenerContainers,
+    broker: FakeBroker,
+    projection: BidProjection,
+    offsets: InMemoryStreamOffsets,
+) -> None:
+    containers.start()
+    deliver(broker, bid("a1"), offset=0, routing_key="payment.received")
+    settled(broker)
+
+    assert projection.bids == []
+    assert broker.acked == [1]
+    assert offsets.last_handled(CONSUMER) is None
 
 
 def test_a_message_continues_the_trace_of_its_sender(
@@ -182,34 +241,47 @@ def test_a_message_that_keeps_failing_is_never_skipped_the_listener_reads_on_fro
     projection: BidProjection,
     offsets: InMemoryStreamOffsets,
 ) -> None:
-    offsets.handled(CONSUMER, 4)
+    handled(offsets, 4)
     containers.start()
     deliver(broker, bid("crash"), offset=5)
-    eventually(lambda: len(reading_channels(broker)) >= 2)
+    eventually(lambda: len(subscriptions(broker)) >= 2)
 
     assert projection.attempts["crash"] == 3
     assert broker.acked == []
     assert offsets.last_handled(CONSUMER) == 4
-    assert reading_channels(broker)[1].consumer_arguments[STREAM] == {"x-stream-offset": 5}
+    assert subscriptions(broker)[1] == {"x-stream-offset": 5}
 
 
-def test_a_message_without_an_offset_is_acknowledged_and_not_handled(
+def test_a_listener_that_rabbitmq_stops_reading_subscribes_again(
+    containers: RabbitStreamListenerContainers, broker: FakeBroker, offsets: InMemoryStreamOffsets
+) -> None:
+    containers.start()
+    eventually(lambda: bool(reading_channels(broker)))
+    handled(offsets, 9)
+
+    broker.cancel_consumers(STREAM)  # as when the stream is deleted
+    eventually(lambda: len(subscriptions(broker)) >= 2)
+
+    assert subscriptions(broker)[1] == {"x-stream-offset": 10}
+
+
+def test_a_message_without_an_offset_stays_where_it_is_and_the_listener_stops_reading(
     containers: RabbitStreamListenerContainers, broker: FakeBroker, projection: BidProjection
 ) -> None:
     containers.start()
-    broker.deliver(STREAM, bid("a1"))
-    settled(broker)
+    broker.deliver(STREAM, bid("a1"), routing_key="auction.bid")  # from a classic queue, which has no offsets
+    eventually(lambda: len(subscriptions(broker)) >= 2)
 
     assert projection.bids == []
-    assert broker.acked == [1]
+    assert broker.acked == []
 
 
-def test_a_stream_that_takes_the_name_of_a_classic_queue_stops_the_start_up(
+def test_a_classic_queue_with_the_name_of_the_stream_stops_the_start_up(
     containers: RabbitStreamListenerContainers, broker: FakeBroker
 ) -> None:
     broker.queues[STREAM] = {}
 
-    with pytest.raises(AmqpDeclarationError, match="cannot take the name of a classic queue"):
+    with pytest.raises(AmqpDeclarationError, match=r"the classic queue auctions\.history cannot become a stream"):
         containers.start()
 
 

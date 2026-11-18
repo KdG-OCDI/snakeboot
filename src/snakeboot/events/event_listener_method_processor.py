@@ -18,6 +18,11 @@ class EventListenerMethodProcessor:
         self._listeners = list(listeners)
         self._registered = False
 
+    @property
+    def listeners(self) -> list[object]:
+        """Every listener it registers."""
+        return list(self._listeners)
+
     def register_listeners(self) -> None:
         """Hands every listener to the publisher, the first time it is called."""
         if not self._registered:

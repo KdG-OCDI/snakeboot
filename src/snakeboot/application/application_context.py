@@ -31,6 +31,7 @@ from snakeboot.configuration import (
 from snakeboot.events.application_event_listener import refuse_listener_methods_nobody_registers
 from snakeboot.events.event_listener_markers import LISTENER_MAPPING_ATTRIBUTE, ListenerMapping
 from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
+from snakeboot.events.externalized import EXTERNALIZED_ATTRIBUTE, refuse_externalized_events_nobody_sends
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.transaction import TransactionManager, TransactionManagerRegistry
 
@@ -232,6 +233,7 @@ class ApplicationContext(ApplicationComponents):
         processor.register_listeners()
         marked = self.scan.methods_marked(LISTENER_MAPPING_ATTRIBUTE, ListenerMapping)
         refuse_listener_methods_nobody_registers((method.name, method.owner) for method in marked)
+        refuse_externalized_events_nobody_sends(self.scan.classes_marked(EXTERNALIZED_ATTRIBUTE), processor.listeners)
 
     def _module_names(self) -> list[str]:
         # The sections of snakeboot are declared outside the scan: their modules hold their providers.

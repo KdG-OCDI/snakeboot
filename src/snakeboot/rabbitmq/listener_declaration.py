@@ -34,21 +34,37 @@ def declare_listener_queue(channel: Any, listener: str, mapping: RabbitListenerM
         raise AmqpDeclarationError(_refusal(listener, mapping, error)) from error
 
 
-def declare_listener_stream(channel: Any, listener: str, mapping: RabbitStreamListenerMapping) -> None:
-    """Declares the durable topic exchange, the stream (a durable queue of type `stream`) and its binding.
+def declare_listener_stream(connection: Any, listener: str, mapping: RabbitStreamListenerMapping) -> Any:
+    """Declares the durable topic exchange, the stream (a durable queue of type `stream`) and its binding, on a
+    channel of `connection`, and returns the channel to read from.
 
-    Raises AmqpDeclarationError, naming `listener`, when RabbitMQ refuses one; RabbitMQ then closed the channel.
+    A stream that exists keeps the arguments it was declared with, such as a retention (`x-max-age`) set in
+    RabbitMQ's definitions: when RabbitMQ refuses the declaration over such an argument, the stream is taken as it
+    is. Raises AmqpDeclarationError, naming `listener`, when RabbitMQ refuses anything else.
     """
+    channel = connection.channel()
     try:
         channel.exchange_declare(exchange=mapping.exchange, exchange_type="topic", durable=True)
         channel.queue_declare(queue=mapping.stream, durable=True, arguments={_QUEUE_TYPE: "stream"})
+    except ChannelClosedByBroker as error:
+        if error.reply_code != _PRECONDITION_FAILED or _QUEUE_TYPE in error.reply_text:
+            raise AmqpDeclarationError(_stream_refusal(listener, mapping, error)) from error
+        channel = connection.channel()  # RabbitMQ closed the other; the stream is there, with arguments of its own
+    try:
         channel.queue_bind(queue=mapping.stream, exchange=mapping.exchange, routing_key=mapping.routing_key)
     except ChannelClosedByBroker as error:
-        raise AmqpDeclarationError(
-            f"RabbitMQ refused what {listener} declares: {error.reply_text}. A queue that exists keeps its type: a "
-            f"stream cannot take the name of a classic queue, so name another stream, or delete the queue "
-            f"{mapping.stream} first."
-        ) from error
+        raise AmqpDeclarationError(_stream_refusal(listener, mapping, error)) from error
+    return channel
+
+
+def _stream_refusal(listener: str, mapping: RabbitStreamListenerMapping, error: ChannelClosedByBroker) -> str:
+    refusal = f"RabbitMQ refused what {listener} declares: {error.reply_text}."
+    if error.reply_code == _PRECONDITION_FAILED and _QUEUE_TYPE in error.reply_text:
+        return (
+            f"{refusal} A queue that exists keeps its type: the classic queue {mapping.stream} cannot become a "
+            "stream, so name another stream, or delete the queue first."
+        )
+    return refusal
 
 
 def _declare(channel: Any, mapping: RabbitListenerMapping) -> None:

@@ -31,16 +31,20 @@ def rabbit_stream_listener(*, stream: str, exchange: str, routing_key: str) -> M
             def on_auction_event(self, message: dict[str, Any]) -> None: ...
 
     When the application starts, the durable topic exchange, the stream (a durable queue of type `stream`) and the
-    binding are declared. The method takes one message, as a `@rabbit_listener` does: a pydantic model, a `dict` or
-    `bytes`. It handles the message and saves its offset in one transaction: with `[database]` the offset is a row of
+    binding are declared; a stream declared already with arguments of its own, such as `x-max-age`, is taken as it
+    is. The method takes one message, as a `@rabbit_listener` does: a pydantic model, a `dict` or `bytes`. It claims
+    the message's offset and handles the message in one transaction: with `[database]` the offset is a row of
     `snakeboot_stream_offset`, so after a restart the method reads on from the next message, without a gap and without
-    handling one twice; without a database the offset lives in memory, and the method reads the stream from the
-    start again at every start, building its projection in memory anew. The offset belongs to the method, by its
-    name `module.Class.method`: renaming it reads the stream from the start again.
+    handling one twice, and of the processes of the service that all read the stream, one handles each message.
+    Without a database the offset lives in memory, and the method reads the stream from the start again at every
+    start, building its projection in memory anew. The offset belongs to the method, by its name
+    `module.Class.method`: renaming it reads the stream from the start again.
 
     A stream only keeps what reached it: what the exchange routed before the stream was declared is lost. So start
     the consumer once before the events it needs, or declare the stream with RabbitMQ's definitions. RabbitMQ keeps a
-    stream for ever unless a policy limits it (`max-age`, `max-length-bytes`).
+    stream for ever unless a policy limits it (`max-age`, `max-length-bytes`). The stream holds what the bindings of
+    all its listeners route to it; the method handles what its own `routing_key` matches. A stream deleted and
+    declared anew counts from 0 again: delete the method's row of `snakeboot_stream_offset` with it.
 
     `RejectAndDontRequeueError`, or a body that cannot be converted, skips the message for good. Another failure,
     such as a database that is down, is tried again as `[rabbitmq.listener.retry]` says; then the method stops reading

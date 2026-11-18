@@ -542,9 +542,12 @@ class InvoiceOnOrderPlaced:
 `@application_module_listener` of snakeboot's own (`EventExternalizer`) sends every such event as JSON to the topic
 exchange, once the publisher's transaction committed. With `[database]` the publication waits in the outbox until the
 broker confirmed the message, so the event reaches RabbitMQ at least once, also when the broker was down: no service
-reads another's database, and no service exports one. The listeners of the application hear the event as before. The
-class is a dataclass or a Pydantic model; another stops the start. Unlike Spring Modulith, an event published outside a
-transaction is sent at once instead of not at all (kept in no outbox), so an application without a database sends too.
+reads another's database, and no service exports one. The message id is the publication's, the same each time it is
+sent again, so a receiver recognises a duplicate. The listeners of the application hear the event as before. The class
+belongs to the component scan and is a dataclass or a Pydantic model; another stops the start, and so does an
+`@externalized` event in an application without `[rabbitmq]`, which nothing would send. Unlike Spring Modulith, an event
+published outside a transaction is sent at once instead of not at all (kept in no outbox), so an application without
+a database sends too.
 
 ```python
 @externalized("auctions::auction.closed")
@@ -790,11 +793,13 @@ rabbitmqctl set_policy tictactoe.game-started.dead-letter '^tictactoe\.game-star
 **Streams: projections from the history of events.** A queue forgets a message once a listener took it; a
 RabbitMQ stream keeps every message, like a Kafka topic, and every consumer reads it at its own pace.
 `@rabbit_stream_listener` reads one: the first time from its start, so a new service builds its projection of another
-service's events from their whole history, and from then on in real time. The method handles a message and saves its
-offset in one transaction: with `[database]` in `snakeboot_stream_offset` (which `make_migration` writes once the
-application has a stream listener), so after a restart it reads on from the next message, without a gap and without
-handling one twice; without a database the offset lives in memory, and the method rebuilds its in-memory projection
-from the start at every start. The offset belongs to the method, by its name: renaming it reads the stream again.
+service's events from their whole history, and from then on in real time. The method claims a message's offset and
+handles the message in one transaction: with `[database]` in `snakeboot_stream_offset` (which `make_migration` writes
+once the application has a stream listener), so after a restart it reads on from the next message, without a gap and
+without handling one twice. Every process of the service (`workers`, replicas) reads the stream, but the claim locks
+the method's offset, so one of them handles each message. Without a database the offset lives in memory: each process
+rebuilds its in-memory projection from the start at every start. The offset belongs to the method, by its name:
+renaming it reads the stream again.
 
 ```python
 @component
@@ -805,13 +810,18 @@ class BidStatistics:                                  # the projection an AI com
     def on_auction_event(self, message: AuctionEvent) -> None: ...
 ```
 
-The start-up declares the exchange, the stream (a durable queue of type `stream`) and the binding. A stream keeps only
-what reached it: declare it before the events it needs (start the consumer once, or put it in RabbitMQ's definitions),
-and limit it with a policy (`max-age`, `max-length-bytes`) or it is kept for ever. `RejectAndDontRequeueError`, or a body
-that cannot be converted, skips a message for good. Another failure is tried again as `[rabbitmq.listener.retry]`
-says; then the method stops reading and reads on from the same message after a while, so a projection never misses
-one. `[rabbitmq.listener] auto_startup = false` keeps a process from reading. In a test, the `InProcessRabbitTemplate`
-hands every message the exchange routes to a stream to its stream listeners, with the next offset of that stream.
+The start-up declares the exchange, the stream (a durable queue of type `stream`) and the binding; a stream declared
+already, with a retention of its own (`x-max-age`), is taken as it is. A stream keeps only what reached it: declare it
+before the events it needs (start the consumer once, or put it in RabbitMQ's definitions), and limit it with a policy
+or an argument (`max-age`, `max-length-bytes`) or it is kept for ever. Several services may read one stream: it holds
+what the bindings of all of them route to it, and each method handles only what its own routing key matches.
+`RejectAndDontRequeueError`, or a body that cannot be converted, skips a message for good. Another failure is tried
+again as `[rabbitmq.listener.retry]` says; then the method stops reading and reads on from the same message after a
+while, so a projection never misses one. When RabbitMQ stops a method reading, as when the stream is deleted, it
+subscribes again. A stream that is deleted and declared anew counts its offsets from 0 again: delete the methods' rows
+of `snakeboot_stream_offset` too, or they wait for the offset they had reached. `[rabbitmq.listener] auto_startup =
+false` keeps a process from reading. In a test, the `InProcessRabbitTemplate` hands every message the exchange routes
+to a stream to its stream listeners, with the next offset of that stream; one that fails stalls, as on RabbitMQ.
 
 **Health and metrics.** Like Spring Boot's actuator, the server answers beside the API, without a token:
 `/health/liveness` is UP while the process answers (Kubernetes's livenessProbe); `/health` and `/health/readiness`

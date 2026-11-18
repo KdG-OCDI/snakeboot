@@ -13,17 +13,12 @@ from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.lifecycle import Lifecycle
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.rabbitmq.listener_declaration import AmqpDeclarationError, declare_listener_stream
-from snakeboot.rabbitmq.message_conversion import MessageConversionError
+from snakeboot.rabbitmq.listener_timing import ListenerTiming
+from snakeboot.rabbitmq.message_attempts import Attempted, MessageAttempts
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
-from snakeboot.rabbitmq.rabbit_listener import RejectAndDontRequeueError
-from snakeboot.rabbitmq.rabbit_listener_containers import (
-    BoundListener,
-    ListenerTiming,
-    bound_listener,
-    close_quietly,
-    paused_until_stopping,
-)
+from snakeboot.rabbitmq.rabbit_listener_containers import BoundListener, bound_listener, close_quietly
 from snakeboot.rabbitmq.rabbit_stream_listener import RabbitStreamListenerMapping
+from snakeboot.rabbitmq.topic_routing import routes
 from snakeboot.tracing import TRACEPARENT, TraceContext
 from snakeboot.transaction import TransactionManagerRegistry
 
@@ -65,7 +60,8 @@ class RabbitStreamListenerEndpoint:
         return FIRST if last is None else last + 1
 
     def receive(self, body: bytes, offset: int) -> None:
-        """Handles the message at `offset` and saves the offset, in one transaction.
+        """Claims `offset` and handles its message, in one transaction; a message the method, or another process of
+        the service, handled already is left alone.
 
         Raises MessageConversionError for a body the method cannot take, and whatever the method raises.
         """
@@ -73,17 +69,17 @@ class RabbitStreamListenerEndpoint:
         self._task_decorator.decorate(partial(self._handle, message, offset))()
 
     def skip(self, offset: int) -> None:
-        """Saves `offset` without handling its message: one refused for good."""
-        self._task_decorator.decorate(partial(self._remember, offset))()
+        """Claims `offset` without handling its message: one refused for good."""
+        self._task_decorator.decorate(partial(self._claim, offset))()
 
     def _handle(self, message: object, offset: int) -> None:
-        with _transaction():
-            self._listener.handle(message)
-            self._offsets.handled(self.name, offset)
+        with _transaction(), self._offsets.claiming(self.name, offset) as new:
+            if new:
+                self._listener.handle(message)
 
-    def _remember(self, offset: int) -> None:
-        with _transaction():
-            self._offsets.handled(self.name, offset)
+    def _claim(self, offset: int) -> None:
+        with _transaction(), self._offsets.claiming(self.name, offset):
+            pass
 
 
 def rabbit_stream_listener_endpoints(
@@ -119,9 +115,11 @@ class RabbitStreamListenerContainers(Lifecycle, component=False):
     `start` builds the methods, so one that cannot receive as declared stops the start-up, even with `auto_startup`
     off. With it on, it declares every exchange, stream and binding before any method reads, and a declaration
     RabbitMQ refuses stops the start-up too (`AmqpDeclarationError`). Each method then reads its stream from the
-    offset after the last message it handled, or from the start, and reconnects when the broker goes away. A message
-    whose handling keeps failing is not skipped: the method stops reading, waits, and reads on from that message, so
-    a projection built from the stream never misses one. `stop` lets each finish the message in hand.
+    offset after the last message it handled, or from the start, and reconnects when the broker goes away or stops
+    it reading. It handles the messages its own routing key matches: the stream holds what the bindings of every
+    listener of it put there. A message whose handling keeps failing is not skipped: the method stops reading, waits,
+    and reads on from that message, so a projection built from the stream never misses one. `stop` lets each finish
+    the message in hand.
 
     `snakeboot.rabbitmq.rabbitmq_injectable` registers it with wireup; tests build it with a stand-in for the broker.
     """
@@ -175,9 +173,8 @@ class RabbitStreamListenerContainers(Lifecycle, component=False):
     def _declare(self, endpoints: list[RabbitStreamListenerEndpoint]) -> None:
         connection = self._connection_factory.open()
         try:
-            channel = connection.channel()
             for endpoint in endpoints:
-                declare_listener_stream(channel, endpoint.name, endpoint.mapping)
+                declare_listener_stream(connection, endpoint.name, endpoint.mapping)
         finally:
             close_quietly(connection)
 
@@ -206,6 +203,7 @@ class _StreamReader:
         self._connection_factory = connection_factory
         self._timing = timing
         self._stopping = stopping
+        self._attempts = MessageAttempts(endpoint.name, timing, stopping)
         self._stalled = False
 
     def run(self) -> None:
@@ -229,15 +227,22 @@ class _StreamReader:
         start = self._endpoint.start_offset()
         connection = self._connection_factory.open()
         try:
-            channel = connection.channel()
-            declare_listener_stream(channel, self._endpoint.name, mapping)
+            channel = declare_listener_stream(connection, self._endpoint.name, mapping)
             channel.basic_qos(prefetch_count=_PREFETCH)
             channel.basic_consume(
                 queue=mapping.stream, on_message_callback=self._on_message, arguments={STREAM_OFFSET: start}
             )
             logger.info("%s reads %s from %s", self._endpoint.name, mapping.stream, start)
-            while not self._stopping.is_set() and not self._stalled:
+            while not self._stopping.is_set() and not self._stalled and channel.consumer_tags:
                 connection.process_data_events(time_limit=self._timing.poll_seconds)
+            if not self._stopping.is_set() and not self._stalled:
+                logger.warning(
+                    "RabbitMQ stopped %s reading %s, as when the stream is deleted; it reads on in %s s",
+                    self._endpoint.name,
+                    mapping.stream,
+                    self._timing.reconnect_seconds,
+                )
+                self._stalled = True
         finally:
             close_quietly(connection)  # what it received and did not acknowledge, it reads again from the offset
 
@@ -247,8 +252,15 @@ class _StreamReader:
         headers = getattr(properties, "headers", None) or {}
         offset, traceparent = headers.get(STREAM_OFFSET), headers.get(TRACEPARENT)
         if not isinstance(offset, int):
-            logger.warning("%s received a message without an offset from %s", self._endpoint.name, self._stream)
-            channel.basic_ack(delivery_tag=delivery.delivery_tag)
+            logger.error(
+                "%s received a message without an offset: %s is a classic queue, no stream; the message stays there",
+                self._endpoint.name,
+                self._stream,
+            )
+            self._stalled = True
+            return
+        if not routes(self._endpoint.mapping.routing_key, delivery.routing_key):
+            channel.basic_ack(delivery_tag=delivery.delivery_tag)  # the binding of another listener put it there
             return
         with TraceContext.started(traceparent if isinstance(traceparent, str) else None):
             outcome = self._handled(body, offset, channel.connection)
@@ -262,46 +274,19 @@ class _StreamReader:
         return self._endpoint.mapping.stream
 
     def _handled(self, body: bytes, offset: int, connection: Any) -> _Outcome:
-        pauses = self._timing.retry_pauses()
-        for attempt in range(1, self._timing.attempts + 1):
-            pause = next(pauses)
-            if (outcome := self._attempt(body, offset, attempt)) is not None:
-                return outcome
-            stopping = paused_until_stopping(
-                connection, pause, stopping=self._stopping, poll_seconds=self._timing.poll_seconds
-            )
-            if stopping:
-                break
-        return _Outcome.STALLED
-
-    def _attempt(self, body: bytes, offset: int, attempt: int) -> _Outcome | None:
-        name, attempts = self._endpoint.name, self._timing.attempts
-        try:
-            self._endpoint.receive(body, offset)
-        except (MessageConversionError, RejectAndDontRequeueError) as error:
-            logger.warning("%s skips the message at offset %s of %s for good: %r", name, offset, self._stream, error)
-            return self._skipped(offset)
-        except Exception:
-            if attempt == attempts:
-                logger.exception(
-                    "%s failed on the message at offset %s of %s %s times; it reads on from it in %s s",
-                    name,
-                    offset,
-                    self._stream,
-                    attempts,
-                    self._timing.reconnect_seconds,
+        message = f"the message at offset {offset} of {self._stream}"
+        match self._attempts.run(partial(self._endpoint.receive, body, offset), connection, message):
+            case Attempted.DONE:
+                return _Outcome.DONE
+            case Attempted.REFUSED:
+                return self._skipped(offset)
+            case Attempted.EXHAUSTED:
+                logger.error(
+                    "%s reads on from %s in %s s", self._endpoint.name, message, self._timing.reconnect_seconds
                 )
                 return _Outcome.STALLED
-            logger.warning(
-                "%s failed on the message at offset %s (attempt %s of %s)",
-                name,
-                offset,
-                attempt,
-                attempts,
-                exc_info=True,
-            )
-            return None
-        return _Outcome.DONE
+            case Attempted.STOPPED:
+                return _Outcome.STALLED
 
     def _skipped(self, offset: int) -> _Outcome:
         try:

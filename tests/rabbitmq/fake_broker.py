@@ -11,6 +11,7 @@ from typing import Any
 from pika.exceptions import AMQPConnectionError, ChannelClosedByBroker, StreamLostError
 
 type Consumer = Callable[[Any, Any, Any, bytes], None]
+type Delivery = tuple[str, bytes, dict[str, object] | None, str]
 
 
 @dataclass
@@ -34,6 +35,7 @@ class FakeBroker:
     lost_publishes: int = 0
     exchanges: dict[str, tuple[str, bool]] = field(default_factory=dict)
     queues: dict[str, dict[str, object]] = field(default_factory=dict)
+    """Every queue and stream declared, with its arguments."""
     bindings: set[tuple[str, str, str]] = field(default_factory=set)
     acked: list[int] = field(default_factory=list)
     rejected: list[tuple[int, bool]] = field(default_factory=list)
@@ -41,7 +43,7 @@ class FakeBroker:
     slept: list[float] = field(default_factory=list)
     connections: list["FakeConnection"] = field(default_factory=list)
     settled: threading.Event = field(default_factory=threading.Event)
-    _pending: "queue.Queue[tuple[str, bytes, dict[str, object] | None]]" = field(default_factory=queue.Queue)
+    _pending: "queue.Queue[Delivery]" = field(default_factory=queue.Queue)
     _lock: threading.Lock = field(default_factory=threading.Lock)
 
     def connect(self, _parameters: Any) -> "FakeConnection":
@@ -54,11 +56,19 @@ class FakeBroker:
             self.connections.append(connection)
             return connection
 
-    def deliver(self, queue_name: str, body: bytes, headers: dict[str, object] | None = None) -> None:
-        """Puts a message, with its headers, on a queue, for the listener of that queue."""
-        self._pending.put((queue_name, body, headers))
+    def deliver(
+        self, queue_name: str, body: bytes, headers: dict[str, object] | None = None, routing_key: str = ""
+    ) -> None:
+        """Puts a message, with its headers and the routing key it was sent with, on a queue, for its listener."""
+        self._pending.put((queue_name, body, headers, routing_key))
 
-    def next_delivery(self, timeout: float) -> tuple[str, bytes, dict[str, object] | None] | None:
+    def cancel_consumers(self, queue_name: str) -> None:
+        """What RabbitMQ does when a queue or stream is deleted: it cancels every consumer of it."""
+        for connection in list(self.connections):
+            for channel in connection.channels:
+                channel.consumers.pop(queue_name, None)
+
+    def next_delivery(self, timeout: float) -> "Delivery | None":
         """The next message for a consumer, or None after `timeout`."""
         try:
             return self._pending.get(timeout=timeout)
@@ -87,13 +97,26 @@ class FakeChannel:
     def exchange_declare(self, exchange: str, exchange_type: str, durable: bool) -> None:
         self._broker.exchanges[exchange] = (exchange_type, durable)
 
-    def queue_declare(self, queue: str, durable: bool, arguments: dict[str, object] | None = None) -> None:
+    @property
+    def consumer_tags(self) -> list[str]:
+        """The consumers RabbitMQ did not cancel."""
+        return list(self.consumers)
+
+    def queue_declare(
+        self, queue: str, durable: bool = False, arguments: dict[str, object] | None = None, *, passive: bool = False
+    ) -> None:
+        if passive:
+            if queue not in self._broker.queues:
+                self.is_open = False
+                raise ChannelClosedByBroker(404, f"NOT_FOUND - no queue '{queue}' in vhost '/'")
+            return
         assert durable
-        declared = self._broker.queues.setdefault(queue, arguments or {})
-        if declared != (arguments or {}):
+        wanted = arguments or {}
+        declared = self._broker.queues.setdefault(queue, wanted)
+        if differing := sorted(key for key in {*declared, *wanted} if declared.get(key) != wanted.get(key)):
             self.is_open = False
             raise ChannelClosedByBroker(
-                406, f"PRECONDITION_FAILED - inequivalent arg 'x-dead-letter-exchange' for queue '{queue}' in vhost '/'"
+                406, f"PRECONDITION_FAILED - inequivalent arg '{differing[0]}' for queue '{queue}' in vhost '/'"
             )
 
     def queue_bind(self, queue: str, exchange: str, routing_key: str) -> None:
@@ -143,14 +166,14 @@ class FakeConnection:
         delivery = self._broker.next_delivery(timeout=time_limit)
         if delivery is None:
             return
-        queue_name, body, headers = delivery
+        queue_name, body, headers, routing_key = delivery
         for channel in self.channels:
             if queue_name in channel.consumers:
                 self._tags += 1
-                properties = SimpleNamespace(headers=headers)
-                channel.consumers[queue_name](channel, SimpleNamespace(delivery_tag=self._tags), properties, body)
+                method = SimpleNamespace(delivery_tag=self._tags, routing_key=routing_key)
+                channel.consumers[queue_name](channel, method, SimpleNamespace(headers=headers), body)
                 return
-        self._broker.deliver(queue_name, body, headers)
+        self._broker.deliver(queue_name, body, headers, routing_key)
         time.sleep(time_limit)
 
     def sleep(self, duration: float) -> None:

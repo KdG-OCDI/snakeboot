@@ -105,3 +105,17 @@ def test_a_new_consumer_reads_the_whole_history_and_a_restarted_one_reads_on() -
 
     with Reader(InMemoryStreamOffsets()) as newcomer:
         eventually(lambda: newcomer.read() == ["a1", "a2", "a3", "a4", "a5"])
+
+
+def test_a_stream_with_a_retention_of_its_own_and_another_binding_is_read_as_it_is(channel: Any) -> None:
+    channel.exchange_declare("auctions", exchange_type="topic", durable=True)
+    channel.queue_declare(STREAM, durable=True, arguments={"x-queue-type": "stream", "x-max-age": "7D"})
+    channel.queue_bind(STREAM, "auctions", routing_key="payment.#")  # the binding of another listener
+    rabbit = RabbitTemplate(connection_factory())
+    rabbit.convert_and_send("auctions", "payment.received", {"auction_id": "p1", "amount": 10})
+
+    with Reader(InMemoryStreamOffsets()) as reader:
+        publish("a1")  # once the reader bound the stream with its own routing key
+        eventually(lambda: reader.read() == ["a1"])
+
+    assert reader.projection.attempts == {"a1": 1}  # the payment was passed over, not handled

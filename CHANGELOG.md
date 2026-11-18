@@ -6,15 +6,19 @@ a minor release may break the API: pin `snakeboot>=0.17,<0.18`.
 ## 0.18.0 (unreleased)
 
 - `@externalized("exchange::key")` on an event class sends its events to RabbitMQ as well, like Spring Modulith's
-  `@Externalized`: through the event publication registry, after the commit, so they reach the broker at least once.
-  The outbox table is part of the schema once the application has an `@externalized` event. Published outside a
-  transaction, the event is sent at once, kept in no outbox. `needed_by` of `@entity` takes several marks, of methods
-  or of classes.
+  `@Externalized`: through the event publication registry, after the commit, so they reach the broker at least once,
+  with the publication's identifier as message id. The outbox table is part of the schema once the application has an
+  `@externalized` event; without `[rabbitmq]` such an event stops the start. Published outside a transaction, the
+  event is sent at once, kept in no outbox. `needed_by` of `@entity` takes several marks, of methods or of classes. An
+  application without `@externalized` events and `@application_module_listener` methods still starts no resubmission.
 - `@rabbit_stream_listener(stream=..., exchange=..., routing_key=...)` reads a RabbitMQ stream: from its start, so a
   service builds a projection from the whole history of another's events, then on from the last message it handled.
-  It saves the offset in the transaction that handled the message, in `snakeboot_stream_offset` with `[database]`, in
-  memory without one. A message that keeps failing is never skipped: the listener reads on from it after a while.
-  The `InProcessRabbitTemplate` hands messages to the stream listeners of a test.
+  It claims the offset in the transaction that handles the message, in `snakeboot_stream_offset` with `[database]`
+  (one upsert, which locks the offset, so of several processes one handles each message), in memory without one. It
+  handles what its routing key matches; a stream declared with a retention of its own is read as it is. A message
+  that keeps failing is never skipped: the listener reads on from it after a while, and subscribes again when
+  RabbitMQ stops it. The `InProcessRabbitTemplate` hands messages to the stream listeners of a test, as RabbitMQ
+  would. `MessageAttempts` tries a message for queue and stream listeners alike.
 
 ## 0.17.0
 

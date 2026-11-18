@@ -1,26 +1,31 @@
-"""`@externalized` names where the events of a class go, and makes them `ExternalizedEvent`s for one listener."""
+"""`@externalized` names where the events of a class go; the start refuses them when no broker sends them."""
 
 from dataclasses import dataclass
-from typing import cast
 
 import pytest
 from pydantic import BaseModel
 
-from snakeboot.event_publication import PersistentEventPublicationRegistry
-from snakeboot.event_publication.event_publication_record import EventPublicationRecords
 from snakeboot.events import (
+    EventExternalization,
     ExternalizationTarget,
-    ExternalizedEvent,
     InvalidExternalizationError,
     externalization_target,
     externalized,
 )
-from snakeboot.rabbitmq import EventExternalizer
+from snakeboot.events.externalized import EXTERNALIZED_ATTRIBUTE, refuse_externalized_events_nobody_sends
 
 
 @externalized("auctions::auction.closed")
 @dataclass(frozen=True, slots=True)
 class AuctionClosed:
+    auction_id: str
+
+
+@dataclass(frozen=True, slots=True)
+@externalized("auctions::auction.opened")
+class AuctionOpened:
+    """Marked beneath a dataclass with slots, which makes a class of its own: the mark goes with it."""
+
     auction_id: str
 
 
@@ -34,18 +39,8 @@ class BidPlaced(BaseModel):
 
 
 @dataclass(frozen=True)
-class AuctionOpened:
+class BidWithdrawn:
     auction_id: str
-
-
-class NotJson:
-    """An event the registry cannot keep as JSON."""
-
-
-def test_the_events_of_an_externalized_class_are_externalized_events() -> None:
-    assert isinstance(AuctionClosed("a1"), ExternalizedEvent)
-    assert isinstance(BidPlaced(auction_id="a1"), ExternalizedEvent)
-    assert not isinstance(AuctionOpened("a1"), ExternalizedEvent)
 
 
 def test_the_target_names_the_exchange_and_the_routing_key() -> None:
@@ -53,14 +48,18 @@ def test_the_target_names_the_exchange_and_the_routing_key() -> None:
     assert externalization_target(BidPlaced(auction_id="a1")) == ExternalizationTarget("auctions", "bid.placed")
 
 
+def test_the_mark_survives_a_dataclass_with_slots_above_it() -> None:
+    assert EXTERNALIZED_ATTRIBUTE in vars(AuctionOpened)
+    assert externalization_target(AuctionOpened("a1")).key == "auction.opened"
+
+
 def test_a_subclass_goes_where_its_base_class_goes() -> None:
-    assert isinstance(AuctionClosedLate("a1"), ExternalizedEvent)
     assert externalization_target(AuctionClosedLate("a1")).key == "auction.closed"
 
 
 def test_an_event_that_is_not_externalized_has_no_target() -> None:
     with pytest.raises(InvalidExternalizationError, match="is not @externalized"):
-        externalization_target(AuctionOpened("a1"))
+        externalization_target(BidWithdrawn("a1"))
 
 
 @pytest.mark.parametrize("target", ["auctions", "auctions::", "::auction.closed", ""])
@@ -69,13 +68,14 @@ def test_a_target_without_an_exchange_and_a_key_is_refused(target: str) -> None:
         externalized(target)
 
 
-def test_an_event_the_registry_cannot_keep_stops_the_start() -> None:
-    registry = PersistentEventPublicationRegistry(cast(EventPublicationRecords, None))  # verify reads no record
-
-    EventExternalizer.verify([AuctionClosed, BidPlaced], [registry])
-    with pytest.raises(InvalidExternalizationError, match="kept as JSON"):
-        EventExternalizer.verify([NotJson], [registry])
+def test_externalized_events_that_no_broker_sends_stop_the_start() -> None:
+    with pytest.raises(InvalidExternalizationError, match=r"AuctionClosed, BidPlaced @externalized.*\[rabbitmq\]"):
+        refuse_externalized_events_nobody_sends([BidPlaced, AuctionClosed], [object()])
 
 
-def test_without_a_registry_nothing_needs_to_be_kept() -> None:
-    EventExternalizer.verify([NotJson], [])
+def test_a_broker_that_sends_them_lets_the_application_start() -> None:
+    refuse_externalized_events_nobody_sends([AuctionClosed], [EventExternalization()])
+
+
+def test_an_application_without_externalized_events_needs_no_broker() -> None:
+    refuse_externalized_events_nobody_sends([], [])

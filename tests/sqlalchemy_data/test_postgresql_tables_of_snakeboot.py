@@ -125,20 +125,41 @@ def test_a_stream_offset_commits_and_rolls_back_with_the_projection(database: Da
     offsets = RepositoryStreamOffsets(repository(StreamOffsetRecords, database))
     workshops = repository(WorkshopRecords, database)
 
-    def project(workshop_id: str, offset: int, *, fails: bool = False) -> None:
-        with database.transaction():
-            workshops.save(WorkshopRecord(workshop_id, "Clean Code"))
-            offsets.handled("myapp.Projection.on_event", offset)
+    def project(workshop_id: str, offset: int, *, fails: bool = False) -> bool:
+        with database.transaction(), offsets.claiming("myapp.Projection.on_event", offset) as new:
+            if new:
+                workshops.save(WorkshopRecord(workshop_id, "Clean Code"))
             if fails:
                 raise RuntimeError("The projection fails.")
+            return new
 
-    project("w1", 2**40)
+    assert project("w1", 2**40)
     with pytest.raises(RuntimeError):
         project("w2", 2**40 + 1, fails=True)
 
     assert offsets.last_handled("myapp.Projection.on_event") == 2**40
     assert [workshop.id for workshop in workshops.find_all()] == ["w1"]
     assert offsets.last_handled("myapp.Other.on_event") is None
+
+
+def test_an_offset_another_process_claimed_is_not_handled_again(database: Database) -> None:
+    other = opened()
+    mine = RepositoryStreamOffsets(repository(StreamOffsetRecords, database))
+    theirs = RepositoryStreamOffsets(repository(StreamOffsetRecords, other))
+    try:
+        with database.transaction(), mine.claiming("myapp.Projection.on_event", 5) as first:
+            pass
+        with other.transaction(), theirs.claiming("myapp.Projection.on_event", 5) as again:
+            pass
+        with other.transaction(), theirs.claiming("myapp.Projection.on_event", 4) as earlier:
+            pass
+        with other.transaction(), theirs.claiming("myapp.Projection.on_event", 6) as later:
+            pass
+    finally:
+        other.close()
+
+    assert (first, again, earlier, later) == (True, False, False, True)
+    assert mine.last_handled("myapp.Projection.on_event") == 6
 
 
 def test_saving_a_stale_entity_is_refused(database: Database) -> None:
