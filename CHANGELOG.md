@@ -1,9 +1,9 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.17,<0.18`.
+a minor release may break the API: pin `snakeboot>=0.18,<0.19`.
 
-## 0.18.0 (unreleased)
+## 0.18.0
 
 - `@externalized("exchange::key")` on an event class sends its events to RabbitMQ as well, like Spring Modulith's
   `@Externalized`: through the event publication registry, after the commit, so they reach the broker at least once,
