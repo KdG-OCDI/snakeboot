@@ -46,8 +46,8 @@ class PersistentEventPublicationRegistry(EventPublicationRegistry):
                 _adapter(event_type)
             except PydanticSchemaGenerationError as error:
                 raise InvalidApplicationEventListenerError(
-                    f"An @application_module_listener receives {event_type.__qualname__}, which the event publication "
-                    "registry cannot keep as JSON: make it a dataclass or a Pydantic model."
+                    f"An @application_module_listener receives {event_type.__qualname__}, or it is @externalized, but "
+                    "the event publication registry cannot keep it as JSON: make it a dataclass or a Pydantic model."
                 ) from error
 
     @override

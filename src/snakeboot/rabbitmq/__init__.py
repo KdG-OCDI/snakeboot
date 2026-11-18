@@ -18,10 +18,20 @@ listeners are a `Lifecycle` component: they consume while an ASGI server serves 
 `run_lifecycle` runs it, and `[rabbitmq.listener] auto_startup = false` keeps a process from consuming. A failing
 message is tried again as `[rabbitmq.listener.retry]` says, then refused: dropped, or kept in `<queue>.dead-letter`
 for a listener with `@rabbit_listener(..., dead_letter=True)`.
+
+    @rabbit_stream_listener(stream="auctions.history", exchange="auctions", routing_key="auction.#")
+    def on_auction_event(self, message: AuctionEvent) -> None: ...    # every message ever, from the first one
+
+A stream listener reads a RabbitMQ stream, which keeps every message: from the start, to build a projection from the
+history, then on from the last message it handled, whose offset it saves in the transaction that handled it. With
+`[rabbitmq]`, every event of an `@externalized` class goes to its exchange as well, through the event publication
+registry (`EventExternalizer`), like Spring Modulith's event externalization.
 """
 
+from snakeboot.rabbitmq.event_externalizer import EventExternalizer
 from snakeboot.rabbitmq.in_process_rabbit_template import InProcessRabbitTemplate, RefusedMessage, SentMessage
 from snakeboot.rabbitmq.listener_declaration import AmqpDeclarationError
+from snakeboot.rabbitmq.listener_timing import ListenerTiming
 from snakeboot.rabbitmq.message_conversion import MessageConversionError
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener import (
@@ -30,12 +40,15 @@ from snakeboot.rabbitmq.rabbit_listener import (
     RejectAndDontRequeueError,
     rabbit_listener,
 )
-from snakeboot.rabbitmq.rabbit_listener_containers import ListenerTiming, RabbitListenerContainers
+from snakeboot.rabbitmq.rabbit_listener_containers import RabbitListenerContainers
+from snakeboot.rabbitmq.rabbit_stream_listener import RabbitStreamListenerMapping, rabbit_stream_listener
+from snakeboot.rabbitmq.rabbit_stream_listener_containers import RabbitStreamListenerContainers
 from snakeboot.rabbitmq.rabbit_template import AmqpPublishError, RabbitTemplate
 
 __all__ = [
     "AmqpDeclarationError",
     "AmqpPublishError",
+    "EventExternalizer",
     "InProcessRabbitTemplate",
     "InvalidRabbitListenerError",
     "ListenerTiming",
@@ -43,9 +56,12 @@ __all__ = [
     "RabbitConnectionFactory",
     "RabbitListenerContainers",
     "RabbitListenerMapping",
+    "RabbitStreamListenerContainers",
+    "RabbitStreamListenerMapping",
     "RabbitTemplate",
     "RefusedMessage",
     "RejectAndDontRequeueError",
     "SentMessage",
     "rabbit_listener",
+    "rabbit_stream_listener",
 ]

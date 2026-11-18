@@ -1,6 +1,7 @@
 import logging
-from collections.abc import Iterable, Sequence
-from contextlib import AbstractContextManager, nullcontext
+from collections.abc import Iterable, Iterator, Sequence
+from contextlib import AbstractContextManager, contextmanager, nullcontext
+from contextvars import ContextVar
 from dataclasses import dataclass
 from functools import partial
 
@@ -12,6 +13,24 @@ from snakeboot.tracing import TraceContext
 from snakeboot.transaction import TransactionManagerRegistry, after_commit
 
 logger = logging.getLogger(__name__)
+
+_PUBLICATION_IN_HAND: ContextVar[EventPublication | None] = ContextVar("publication_in_hand", default=None)
+
+
+def publication_in_hand() -> EventPublication | None:
+    """Returns the publication an `@application_module_listener` is receiving, or None outside one or without a
+    registry: its identifier stays the same each time the registry delivers it again, so it names a message sent on
+    to a broker."""
+    return _PUBLICATION_IN_HAND.get()
+
+
+@contextmanager
+def _in_hand(publication: EventPublication | None) -> Iterator[None]:
+    token = _PUBLICATION_IN_HAND.set(publication)
+    try:
+        yield
+    finally:
+        _PUBLICATION_IN_HAND.reset(token)
 
 
 @dataclass(frozen=True, slots=True)
@@ -59,8 +78,14 @@ class ApplicationEventPublisher:
 
     @property
     def has_application_module_listeners(self) -> bool:
-        """Whether a listener receives events on a thread of its own, so the registry may owe it some."""
-        return any(m.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT for m in self._listeners.methods)
+        """Whether a listener receives events on a thread of its own, so the registry may owe it some.
+
+        A listener that asks for no event type, as a broker's externalizer in an application without `@externalized`
+        events, is owed none.
+        """
+        return any(
+            m.mapping.delivery is Delivery.ASYNC_AFTER_COMMIT and m.mapping.event_types for m in self._listeners.methods
+        )
 
     def register(self, listeners: Iterable[object]) -> None:
         """Adds the listener methods of `listeners`, like Spring's `addApplicationListener`.
@@ -140,7 +165,7 @@ class ApplicationEventPublisher:
         publication = delivery.publication
         with TraceContext.started(delivery.trace.traceparent if delivery.trace is not None else None):
             try:
-                with _own_transaction():
+                with _own_transaction(), _in_hand(publication):
                     delivery.method.receive(delivery.event)
                     if publication is not None and self._registry is not None:
                         self._registry.complete(publication)

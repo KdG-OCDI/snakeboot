@@ -11,6 +11,10 @@
         @application_module_listener(WorkshopCancelled)                 # Spring Modulith's @ApplicationModuleListener
         def refund(self, event: WorkshopCancelled) -> None: ...         # own thread, own transaction, at least once
 
+    @externalized("workshops::workshop.cancelled")                      # Spring Modulith's @Externalized: to a broker
+    @dataclass(frozen=True)
+    class WorkshopCancelled: ...
+
     # in a @transactional use case, after saving the aggregate:
     self._events.publish_all(workshop.pull_events())
 
@@ -27,7 +31,7 @@ from snakeboot.events.application_event_listener import (
     InvalidApplicationEventListenerError,
     application_event_listener,
 )
-from snakeboot.events.application_event_publisher import ApplicationEventPublisher
+from snakeboot.events.application_event_publisher import ApplicationEventPublisher, publication_in_hand
 from snakeboot.events.event_listener_markers import (
     Delivery,
     ListenerMapping,
@@ -36,21 +40,39 @@ from snakeboot.events.event_listener_markers import (
     transactional_event_listener,
 )
 from snakeboot.events.event_publication_registry import EventPublication, EventPublicationRegistry
+from snakeboot.events.externalized import (
+    EventExternalization,
+    ExternalizationTarget,
+    InvalidExternalizationError,
+    externalization_target,
+    externalized,
+)
+from snakeboot.events.stream_offsets import InMemoryStreamOffsets, StreamEvent, StreamOffsets, StreamPosition
 from snakeboot.events.task_executor import SyncTaskExecutor, TaskExecutor, ThreadPoolTaskExecutor
 
 __all__ = [
     "ApplicationEventListener",
     "ApplicationEventPublisher",
     "Delivery",
+    "EventExternalization",
     "EventPublication",
     "EventPublicationRegistry",
+    "ExternalizationTarget",
+    "InMemoryStreamOffsets",
     "InvalidApplicationEventListenerError",
+    "InvalidExternalizationError",
     "ListenerMapping",
+    "StreamEvent",
+    "StreamOffsets",
+    "StreamPosition",
     "SyncTaskExecutor",
     "TaskExecutor",
     "ThreadPoolTaskExecutor",
     "application_event_listener",
     "application_module_listener",
     "event_listener",
+    "externalization_target",
+    "externalized",
+    "publication_in_hand",
     "transactional_event_listener",
 ]

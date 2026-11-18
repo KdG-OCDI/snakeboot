@@ -11,6 +11,9 @@ listener failed, or whose process stopped first, is delivered again, up to `max_
 the table, with its last failure, for a person. The optional table `[events]` sets the timing
 (`PublicationTiming`). Run `make_migration` once to add the table to the application's migrations.
 
+The stream listeners keep how far they read in `snakeboot_stream_offset`, in the transaction that handled the event
+(`RepositoryStreamOffsets`).
+
 It knows `snakeboot.events`, `snakeboot.data`, the lifecycle and Pydantic's JSON, but no persistence framework.
 """
 
@@ -24,6 +27,11 @@ from snakeboot.event_publication.publication_timing import (
     RETRY_AFTER,
     PublicationTiming,
 )
+from snakeboot.event_publication.stream_offset_record import (
+    RepositoryStreamOffsets,
+    StreamOffsetRecord,
+    StreamOffsetRecords,
+)
 
 __all__ = [
     "INCOMPLETE_METRIC",
@@ -36,4 +44,7 @@ __all__ = [
     "EventPublicationResubmitter",
     "PersistentEventPublicationRegistry",
     "PublicationTiming",
+    "RepositoryStreamOffsets",
+    "StreamOffsetRecord",
+    "StreamOffsetRecords",
 ]

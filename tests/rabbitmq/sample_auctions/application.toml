@@ -1,0 +1,26 @@
+[server]
+host = "127.0.0.1"
+port = 8000
+workers = 1
+debug = false
+allowed_hosts = ["*"]
+log_level = "WARNING"
+
+# TestApplication replaces it with a database in memory.
+[database]
+host = "localhost"
+port = 55432
+name = "snakeboot"
+user = "snakeboot"
+password = "snakeboot"
+
+# A RabbitMQ that nobody runs: a test gets a RabbitTemplate that hands its messages to the application itself.
+[rabbitmq]
+host = "localhost"
+port = 5672
+username = "auctions"
+password = "auctions"
+virtual_host = "/"
+
+[rabbitmq.listener]
+auto_startup = false
