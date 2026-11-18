@@ -28,7 +28,10 @@ pytestmark = pytest.mark.skipif(not URL, reason="SNAKEBOOT_TEST_RABBITMQ_URL nam
 
 STREAM_PACKAGE = "tests.rabbitmq.sample_listeners.stream"
 STREAM = "auctions.history"
-QUICK = ListenerTiming(reconnect_seconds=0.1, retry_pause_seconds=0, poll_seconds=0.05, shutdown_seconds=5)
+QUICK = ListenerTiming(
+    reconnect_seconds=0.1, retry_pause_seconds=0, poll_seconds=0.05, shutdown_seconds=5, stream_check_seconds=0.5
+)
+CONSUMER = "tests.rabbitmq.sample_listeners.stream.listeners.BidProjection.on_bid"
 WAIT_SECONDS = 10
 
 
@@ -102,9 +105,124 @@ def test_a_new_consumer_reads_the_whole_history_and_a_restarted_one_reads_on() -
     publish("a5")
     with Reader(offsets) as restarted:
         eventually(lambda: restarted.read() == ["a5"])
+    assert offsets.position(CONSUMER).generation == 0  # the same stream: it never started over
 
     with Reader(InMemoryStreamOffsets()) as newcomer:
         eventually(lambda: newcomer.read() == ["a1", "a2", "a3", "a4", "a5"])
+
+
+def test_a_consumer_that_read_all_of_its_stream_reads_on_without_starting_over() -> None:
+    declare_the_stream()
+    publish("a1", "a2")
+    offsets = read_up_to("a1", "a2")
+
+    with Reader(offsets) as restarted:
+        time.sleep(4 * QUICK.stream_check_seconds)  # nothing new: it waits, and has no doubt about its stream
+        publish("a3")
+        eventually(lambda: restarted.read() == ["a3"])
+
+    assert offsets.position(CONSUMER).generation == 0
+
+
+def declare_the_stream() -> None:
+    with Reader(InMemoryStreamOffsets()):
+        pass  # declares the stream, which keeps every message from now on
+
+
+def read_up_to(*auction_ids: str) -> InMemoryStreamOffsets:
+    """The offsets of a consumer that read the stream as it is now, and stopped."""
+    offsets = InMemoryStreamOffsets()
+    with Reader(offsets) as reader:
+        eventually(lambda: reader.read() == list(auction_ids))
+    return offsets
+
+
+def test_a_shorter_stream_declared_anew_is_read_from_its_start(channel: Any) -> None:
+    declare_the_stream()
+    publish("a1", "a2", "a3")
+    offsets = read_up_to("a1", "a2", "a3")
+
+    channel.queue_delete(STREAM)
+    declare_the_stream()
+    publish("b1")
+
+    with Reader(offsets) as reader:
+        eventually(lambda: reader.read() == ["b1"])
+        publish("b2")
+        eventually(lambda: reader.read() == ["b1", "b2"])
+    assert offsets.position(CONSUMER).generation == 1
+
+
+def test_an_empty_stream_declared_anew_is_read_from_its_start(channel: Any) -> None:
+    declare_the_stream()
+    publish("a1", "a2", "a3")
+    offsets = read_up_to("a1", "a2", "a3")
+
+    channel.queue_delete(STREAM)
+
+    with Reader(offsets) as reader:  # declares it anew, empty
+        eventually(lambda: offsets.position(CONSUMER).generation == 1)
+        publish("b1")
+        eventually(lambda: reader.read() == ["b1"])
+
+
+def test_a_stream_declared_anew_that_grew_beyond_the_last_message_handled_is_read_from_its_start(
+    channel: Any,
+) -> None:
+    declare_the_stream()
+    publish("a1", "a2")
+    offsets = read_up_to("a1", "a2")
+
+    channel.queue_delete(STREAM)
+    declare_the_stream()
+    publish("b1", "b2", "b3", "b4")
+
+    with Reader(offsets) as reader:
+        eventually(lambda: reader.read() == ["b1", "b2", "b3", "b4"])
+    assert offsets.position(CONSUMER).generation == 1
+
+
+def test_a_stream_deleted_and_declared_anew_while_the_consumer_reads_is_read_from_its_start(channel: Any) -> None:
+    declare_the_stream()
+    publish("a1", "a2", "a3")
+    offsets = InMemoryStreamOffsets()
+
+    with Reader(offsets) as reader:
+        eventually(lambda: reader.read() == ["a1", "a2", "a3"])
+        channel.queue_delete(STREAM)
+        eventually(lambda: offsets.position(CONSUMER).generation == 1)  # it declared the stream anew, and looked
+        publish("b1")
+        eventually(lambda: reader.read() == ["a1", "a2", "a3", "b1"])
+
+
+def test_a_stream_answers_a_consumer_as_the_stand_ins_of_the_other_tests_do(channel: Any) -> None:
+    """What the check for a new stream relies on, and what `FakeBroker` imitates."""
+    declare_the_stream()
+    publish("a1", "a2", "a3")  # offsets 0, 1 and 2
+
+    assert offsets_read_from(1) == [1, 2]  # none before the offset asked for
+    assert offsets_read_from(7, publish_meanwhile="a4") == []  # beyond the end: not even what is written next
+    assert offsets_read_from("last") == [3]
+    # The count is right a moment later only, so the check does not take none counted for an empty stream.
+    eventually(lambda: channel.queue_declare(STREAM, passive=True).method.message_count == 4)
+
+
+def offsets_read_from(start: int | str, publish_meanwhile: str | None = None) -> list[int]:
+    connection = pika.BlockingConnection(pika.URLParameters(URL))
+    reading = connection.channel()
+    reading.basic_qos(prefetch_count=100)
+    read: list[int] = []
+    reading.basic_consume(
+        STREAM,
+        lambda _channel, _delivery, properties, _body: read.append(properties.headers["x-stream-offset"]),
+        arguments={"x-stream-offset": start},
+    )
+    if publish_meanwhile is not None:
+        publish(publish_meanwhile)
+    connection.process_data_events(time_limit=1)
+    connection.process_data_events(time_limit=1)
+    connection.close()
+    return read
 
 
 def test_a_stream_with_a_retention_of_its_own_and_another_binding_is_read_as_it_is(channel: Any) -> None:

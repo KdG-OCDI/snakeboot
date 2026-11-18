@@ -19,6 +19,14 @@ a minor release may break the API: pin `snakeboot>=0.17,<0.18`.
   that keeps failing is never skipped: the listener reads on from it after a while, and subscribes again when
   RabbitMQ stops it. The `InProcessRabbitTemplate` hands messages to the stream listeners of a test, as RabbitMQ
   would. `MessageAttempts` tries a message for queue and stream listeners alike.
+- A stream that is deleted and declared anew counts from 0 again; its listener finds that out and reads it from the
+  start, like Kafka's `auto.offset.reset=earliest`, with a warning. `snakeboot_stream_offset` keeps a fingerprint of
+  the last message handled and a generation: a listener that reads on asks for that message again, and another
+  message at its offset, or a stream that ends before it (found twice, as a replica may be behind), is another stream.
+  One process starts over (`StreamOffsets.start_over`), and a claim of the old generation moves nothing.
+  `StreamOffsets.claiming` takes a `StreamEvent`, `position` returns a `StreamPosition`;
+  `ListenerTiming.stream_check_seconds` says how long a listener waits for its last message before it looks where
+  the stream ends.
 
 ## 0.17.0
 

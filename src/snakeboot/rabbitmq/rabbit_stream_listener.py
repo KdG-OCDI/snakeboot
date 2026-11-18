@@ -43,8 +43,15 @@ def rabbit_stream_listener(*, stream: str, exchange: str, routing_key: str) -> M
     A stream only keeps what reached it: what the exchange routed before the stream was declared is lost. So start
     the consumer once before the events it needs, or declare the stream with RabbitMQ's definitions. RabbitMQ keeps a
     stream for ever unless a policy limits it (`max-age`, `max-length-bytes`). The stream holds what the bindings of
-    all its listeners route to it; the method handles what its own `routing_key` matches. A stream deleted and
-    declared anew counts from 0 again: delete the method's row of `snakeboot_stream_offset` with it.
+    all its listeners route to it; the method handles what its own `routing_key` matches.
+
+    A stream deleted and declared anew counts from 0 again, so the offset the method saved is one of a stream that is
+    gone. The method finds that out and reads the new stream from its start, like Kafka's
+    `auto.offset.reset=earliest`, with a warning: with its offset it saves a fingerprint of the message, and when it
+    reads on it asks for that message again. Another message at that offset, or a stream that ends before it, is
+    another stream. What the method built from the old stream stays in its projection. A new stream that holds the
+    very same message, without a message id, at the very same offset goes unnoticed. A retention that removed
+    messages the method had not handled yet is a warning, and the method reads on from the oldest one left.
 
     `RejectAndDontRequeueError`, or a body that cannot be converted, skips the message for good. Another failure,
     such as a database that is down, is tried again as `[rabbitmq.listener.retry]` says; then the method stops reading

@@ -14,7 +14,7 @@ from snakeboot.event_publication import (
     StreamOffsetRecord,
     StreamOffsetRecords,
 )
-from snakeboot.events import ApplicationEventPublisher, InvalidExternalizationError, StreamOffsets
+from snakeboot.events import ApplicationEventPublisher, InvalidExternalizationError, StreamEvent, StreamOffsets
 from snakeboot.lifecycle import ApplicationComponents, TaskDecorator
 from snakeboot.rabbitmq import InProcessRabbitTemplate, RabbitTemplate, RejectAndDontRequeueError
 from snakeboot.rabbitmq.rabbit_stream_listener_containers import (
@@ -95,7 +95,10 @@ def test_a_stream_listener_builds_its_projection_and_saves_its_offset(applicatio
         ClosedAuctionRecord("a1", 120),
         ClosedAuctionRecord("a2", 80),
     ]
-    assert application.get(StreamOffsetRecords).find_by_id(PROJECTION) == StreamOffsetRecord(PROJECTION, 1)
+    record = application.get(StreamOffsetRecords).find_by_id(PROJECTION)
+    assert record is not None
+    assert (record.last_offset, record.generation) == (1, 0)
+    assert record.fingerprint is not None  # which message that was, should the stream be declared anew
 
 
 def test_what_a_stream_listener_refuses_is_kept_as_refused_and_skipped(application: TestApplication) -> None:
@@ -141,8 +144,8 @@ def test_of_two_processes_reading_the_stream_one_handles_each_message(applicatio
     first, second = stream_endpoint(application), stream_endpoint(application)
     body = b'{"auction_id": "a1", "winning_bid": 120}'
 
-    first.receive(body, 0)
-    second.receive(body, 0)
+    first.receive(body, StreamEvent(0))
+    second.receive(body, StreamEvent(0))
 
     assert application.get(ClosedAuctionProjection).handled == 1
     assert application.get(StreamOffsets).last_handled(PROJECTION) == 0
@@ -152,8 +155,8 @@ def test_a_failing_listener_rolls_back_its_projection_and_its_offset(application
     endpoint = stream_endpoint(application)
 
     with pytest.raises(RuntimeError):
-        endpoint.receive(b'{"auction_id": "crash", "winning_bid": 1}', 0)
-    endpoint.receive(b'{"auction_id": "a1", "winning_bid": 120}', 0)  # the message is handled again
+        endpoint.receive(b'{"auction_id": "crash", "winning_bid": 1}', StreamEvent(0))
+    endpoint.receive(b'{"auction_id": "a1", "winning_bid": 120}', StreamEvent(0))  # the message is handled again
 
     assert application.get(ClosedAuctionRecords).find_all() == [ClosedAuctionRecord("a1", 120)]
     assert application.get(StreamOffsets).last_handled(PROJECTION) == 0
@@ -166,7 +169,19 @@ def test_the_streams_start_empty_again_after_a_reset(application: TestApplicatio
 
     application.get(CloseAuction).execute("a2", 80)
 
-    assert application.get(StreamOffsetRecords).find_by_id(PROJECTION) == StreamOffsetRecord(PROJECTION, 0)
+    assert application.get(StreamOffsets).last_handled(PROJECTION) == 0
+
+
+def test_a_listener_whose_offset_is_one_of_an_earlier_stream_starts_over(application: TestApplication) -> None:
+    offsets = application.get(StreamOffsets)
+    endpoint = stream_endpoint(application)
+    endpoint.receive(b'{"auction_id": "a0", "winning_bid": 1}', StreamEvent(1000, "of the stream that is gone"))
+
+    application.get(CloseAuction).execute("a1", 120)  # offset 0 of the test's own, empty stream
+
+    assert ClosedAuctionRecord("a1", 120) in application.get(ClosedAuctionRecords).find_all()
+    assert offsets.position(PROJECTION).generation == 1
+    assert offsets.last_handled(PROJECTION) == 0
 
 
 def test_the_outbox_and_the_offsets_are_part_of_the_schema(application: TestApplication) -> None:

@@ -26,6 +26,8 @@ class ListenerTiming:
     """How long a listener waits for messages before it checks whether it must stop."""
     shutdown_seconds: float = 5.0
     """How long `stop` waits for a listener to finish the message in hand."""
+    stream_check_seconds: float = 5.0
+    """How long a stream listener waits for the message it handled last before it asks where its stream ends."""
 
     def retry_pauses(self) -> Iterator[float]:
         """Yields the pause after each failed attempt, in seconds: the first, then each `retry_multiplier` times

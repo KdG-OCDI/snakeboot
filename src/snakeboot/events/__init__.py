@@ -47,7 +47,7 @@ from snakeboot.events.externalized import (
     externalization_target,
     externalized,
 )
-from snakeboot.events.stream_offsets import InMemoryStreamOffsets, StreamOffsets
+from snakeboot.events.stream_offsets import InMemoryStreamOffsets, StreamEvent, StreamOffsets, StreamPosition
 from snakeboot.events.task_executor import SyncTaskExecutor, TaskExecutor, ThreadPoolTaskExecutor
 
 __all__ = [
@@ -62,7 +62,9 @@ __all__ = [
     "InvalidApplicationEventListenerError",
     "InvalidExternalizationError",
     "ListenerMapping",
+    "StreamEvent",
     "StreamOffsets",
+    "StreamPosition",
     "SyncTaskExecutor",
     "TaskExecutor",
     "ThreadPoolTaskExecutor",

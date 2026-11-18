@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from functools import partial
 from typing import Any, override
 
-from snakeboot.events import InMemoryStreamOffsets, StreamOffsets
+from snakeboot.events import InMemoryStreamOffsets, StreamEvent, StreamOffsets
 from snakeboot.lifecycle.application_components import ApplicationComponents
 from snakeboot.lifecycle.task_decorator import TaskDecorator
 from snakeboot.rabbitmq.message_conversion import MessageConversionError, body_of
@@ -68,7 +68,8 @@ class InProcessRabbitTemplate(RabbitTemplate):
     own routing key matches and claims their offsets. What a method refuses for good lands in `refused`, and the
     method skips it. Another failure lands there too, after one attempt, and the method then stalls, as it would on
     RabbitMQ: it handles nothing more of its stream until the next test. A test does not replay a stream: each starts
-    with empty streams.
+    with empty streams, and a method whose offset an earlier test left in the database starts over, as it does on
+    RabbitMQ when its stream is deleted and declared anew.
     """
 
     def __init__(self, components: ApplicationComponents) -> None:  # the broker's connection factory is left out
@@ -140,17 +141,34 @@ class InProcessRabbitTemplate(RabbitTemplate):
     def _read_from_stream(self, endpoint: RabbitStreamListenerEndpoint, message: SentMessage, offset: int) -> None:
         if endpoint.name in self._stalled or not routes(endpoint.mapping.routing_key, message.routing_key):
             return
+        event = StreamEvent.of(offset, message.body, message.message_id)
+        generation = self._generation_to_read_in(endpoint, event)
         try:
-            endpoint.receive(message.body, offset)
+            endpoint.receive(message.body, event, generation=generation)
         except (MessageConversionError, RejectAndDontRequeueError) as error:  # skipped for good, as on RabbitMQ
             logger.warning("%s refused a message to %s", endpoint.name, message.routing_key, exc_info=True)
             self._keep(RefusedMessage(message, endpoint.name, error, None))
-            endpoint.skip(offset)
+            endpoint.skip(event, generation=generation)
         except Exception as error:  # the method stalls on it, as on RabbitMQ, and the sender never fails
             logger.warning("%s failed on a message to %s", endpoint.name, message.routing_key, exc_info=True)
             self._keep(RefusedMessage(message, endpoint.name, error, None))
             with self._lock:
                 self._stalled.add(endpoint.name)
+
+    @staticmethod
+    def _generation_to_read_in(endpoint: RabbitStreamListenerEndpoint, event: StreamEvent) -> int:
+        # A stream gives every message a higher offset, so a method that handled this offset or a later one read
+        # another stream: one of an earlier test, whose offsets the database kept. It starts over, as on RabbitMQ.
+        position = endpoint.position()
+        if position.last is None or position.last.offset < event.offset:
+            return position.generation
+        if endpoint.start_over(position):
+            logger.warning(
+                "%s handled its stream up to offset %s, but the stream is a new one: it reads it from the start",
+                endpoint.name,
+                position.last.offset,
+            )
+        return endpoint.position().generation
 
     def _keep(self, refused: RefusedMessage) -> None:
         with self._lock:

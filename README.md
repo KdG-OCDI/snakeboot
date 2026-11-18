@@ -803,7 +803,7 @@ renaming it reads the stream again.
 
 ```python
 @component
-class BidStatistics:                                  # the projection an AI component predicts from
+class BidStatistics:  # the projection an AI component predicts from
     def __init__(self, bids: BidRecords) -> None: ...
 
     @rabbit_stream_listener(stream="auctions.history", exchange="auctions", routing_key="auction.#")
@@ -818,10 +818,20 @@ what the bindings of all of them route to it, and each method handles only what 
 `RejectAndDontRequeueError`, or a body that cannot be converted, skips a message for good. Another failure is tried
 again as `[rabbitmq.listener.retry]` says; then the method stops reading and reads on from the same message after a
 while, so a projection never misses one. When RabbitMQ stops a method reading, as when the stream is deleted, it
-subscribes again. A stream that is deleted and declared anew counts its offsets from 0 again: delete the methods' rows
-of `snakeboot_stream_offset` too, or they wait for the offset they had reached. `[rabbitmq.listener] auto_startup =
-false` keeps a process from reading. In a test, the `InProcessRabbitTemplate` hands every message the exchange routes
-to a stream to its stream listeners, with the next offset of that stream; one that fails stalls, as on RabbitMQ.
+subscribes again. `[rabbitmq.listener] auto_startup = false` keeps a process from reading.
+
+A stream that is deleted and declared anew counts its offsets from 0 again, so the offset a method saved is one of a
+stream that is gone, as a committed offset beyond the end of a Kafka topic is. The method finds that out and reads the
+new stream from its start, like Kafka's `auto.offset.reset=earliest`, with a warning in the log. With its offset it
+saves a fingerprint of the message (its body and message id), and when it reads on it first asks RabbitMQ for that
+message again: another message at that offset, or a stream that ends before it, is another stream. Of the processes
+of a service one starts over, and a message of the old stream a process still had in hand moves nothing. What the
+method built from the old stream stays in its projection: empty that yourself when the new stream does not continue
+the old one. One case goes unnoticed: a new stream that holds the very same message, without a message id, at the
+very same offset. A retention that removed messages the method had not handled yet is a warning too, and the method
+reads on from the oldest message left. In a test, the `InProcessRabbitTemplate` hands every message the exchange routes
+to a stream to its stream listeners, with the next offset of that stream; one that fails stalls, as on RabbitMQ, and
+one whose offset an earlier test left in the database starts over, as its stream is a new one.
 
 **Health and metrics.** Like Spring Boot's actuator, the server answers beside the API, without a token:
 `/health/liveness` is UP while the process answers (Kubernetes's livenessProbe); `/health` and `/health/readiness`
