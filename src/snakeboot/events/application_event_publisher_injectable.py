@@ -46,7 +46,8 @@ def application_event_publisher(
 def event_listener_method_processor(
     publisher: ApplicationEventPublisher, listeners: Sequence[ApplicationEventListener] = ()
 ) -> EventListenerMethodProcessor:
-    """Provides what registers every `@application_event_listener` wireup knows with the publisher at start-up.
+    """Provides what registers every listener with the publisher at start-up, starting with the
+    `@application_event_listener`s wireup knows.
 
     Wireup only creates `Sequence[ApplicationEventListener]` when at least one listener
     exists. Without the default, an application without listeners would not even start;

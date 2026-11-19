@@ -69,7 +69,7 @@ class TestApplication:
     """A started application for a test, like Spring Boot's `@SpringBootTest` with `@AutoConfigureTestDatabase`.
 
         with TestApplication.start(TictactoeApplication, overrides={GamePlatformPort: FakePlatform()}) as app:
-            client = app.client()                                  # calls the REST API, like TestRestTemplate
+            client = app.client()                                  # calls the REST API in this process, like MockMvc
             assert client.get("/api/tictactoe/games/42").status_code == 404
             assert app.get(GameRecords).count() == 0               # any component of the container
 
@@ -193,7 +193,7 @@ class TestApplication:
         return cast("T", spy)
 
     def client(self) -> RestClient:
-        """Returns a client of the REST API that calls the application in this process, like `TestRestTemplate`.
+        """Returns a client of the REST API that calls the application in this process, like `MockMvc`.
 
         The calls go to the first of `[server] allowed_hosts`. Used as a context manager (`with app.client() as
         client:`), the lifecycle starts and stops around it, as the server's would.

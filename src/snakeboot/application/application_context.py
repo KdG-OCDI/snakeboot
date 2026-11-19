@@ -28,7 +28,7 @@ from snakeboot.configuration import (
     begin_configuration,
     sections_declared_in,
 )
-from snakeboot.events.application_event_listener import refuse_listener_methods_nobody_registers
+from snakeboot.events.application_event_listener import listening_components
 from snakeboot.events.event_listener_markers import LISTENER_MAPPING_ATTRIBUTE, ListenerMapping
 from snakeboot.events.event_listener_method_processor import EventListenerMethodProcessor
 from snakeboot.events.externalized import EXTERNALIZED_ATTRIBUTE, refuse_externalized_events_nobody_sends
@@ -144,7 +144,7 @@ class ApplicationContext(ApplicationComponents):
         database with one in memory. `additions` are wireup's injectables that join the container besides the
         modules, as a test adds a listener that records every event. `prepare` runs on the built container before the
         listeners are built, like Spring's `BeanFactoryPostProcessor`, as a test replaces the components it finds
-        there. Then every `@application_event_listener` is built and registered with the publisher, like Spring's
+        there. Then every component with listener methods is built and registered with the publisher, like Spring's
         `EventListenerMethodProcessor` once every singleton exists. A missing value, an unknown table, a dependency
         the container cannot satisfy or a listener that cannot be built stops the start here, and closes the context.
         """
@@ -225,14 +225,14 @@ class ApplicationContext(ApplicationComponents):
     def _register_listeners(self) -> None:
         # The publisher depends on no listener, so a listener may inject a use case that publishes; building them all
         # here, while the application starts, stops it on a listener that cannot be built instead of the first event.
+        marked = self.scan.methods_marked(LISTENER_MAPPING_ATTRIBUTE, ListenerMapping)
         try:
             processor = self.get(EventListenerMethodProcessor)
+            processor.include(listening_components(((method.name, method.owner) for method in marked), self.get))
         except Exception as error:
             error.add_note("Raised while the application started and built its event listeners.")
             raise
         processor.register_listeners()
-        marked = self.scan.methods_marked(LISTENER_MAPPING_ATTRIBUTE, ListenerMapping)
-        refuse_listener_methods_nobody_registers((method.name, method.owner) for method in marked)
         refuse_externalized_events_nobody_sends(self.scan.classes_marked(EXTERNALIZED_ATTRIBUTE), processor.listeners)
 
     def _module_names(self) -> list[str]:

@@ -6,7 +6,7 @@
         @override
         def stop(self) -> None: ...
 
-    @application_event_listener                       # once everything has started
+    @component                       # once everything has started
     class RegisterOnStartup:
         @event_listener(ApplicationReadyEvent)
         def register(self, event: ApplicationReadyEvent) -> None: ...

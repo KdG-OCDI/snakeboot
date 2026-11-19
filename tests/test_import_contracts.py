@@ -20,6 +20,8 @@ def test_import_contracts_are_kept() -> None:
         cwd=PROJECT_ROOT,
         capture_output=True,
         text=True,
+        encoding="utf-8",  # lint-imports writes UTF-8; PowerShell's code page would not read it
+        errors="replace",
         check=False,
     )
 

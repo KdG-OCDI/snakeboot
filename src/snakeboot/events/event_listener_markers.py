@@ -67,7 +67,7 @@ def transactional_event_listener(
     application without a database; `fallback_execution=True` delivers the event at once instead. It never starts a
     transaction, and never delivers after a rollback but in `AFTER_ROLLBACK` or `AFTER_COMPLETION`.
 
-        @application_event_listener
+        @component
         class MailOnOrderPlaced:
             @transactional_event_listener(OrderPlaced)
             def send_confirmation(self, event: OrderPlaced) -> None: ...
@@ -88,7 +88,7 @@ def application_module_listener(*event_types: type, fallback_execution: bool = F
     transaction when the listener succeeds, and delivered again when the listener fails or the process stopped
     first. So the event arrives at least once, and the listener must bear receiving it twice.
 
-        @application_event_listener
+        @component
         class InvoiceOnOrderPlaced:
             @application_module_listener(OrderPlaced)
             def create_invoice(self, event: OrderPlaced) -> None: ...

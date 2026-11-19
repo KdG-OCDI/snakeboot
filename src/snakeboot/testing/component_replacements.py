@@ -20,7 +20,9 @@ def test_component[C: type](*, replaces: Any) -> Callable[[C], C]:
 
         @test_component(replaces=ClockPort)
         class FixedClock(ClockPort):
-            def __init__(self, now: datetime = NOW) -> None: ...
+            def __init__(self) -> None:
+                self._time = FIXED_TIME  # stands still until a test moves it on
+
             def advance(self, duration: timedelta) -> None: ...
 
         @application_test

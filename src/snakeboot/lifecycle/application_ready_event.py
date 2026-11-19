@@ -7,7 +7,7 @@ class ApplicationReadyEvent:
 
     The place for work that must happen once per start, such as registering with another service:
 
-        @application_event_listener
+        @component
         class RegisterOnStartup:
             @event_listener(ApplicationReadyEvent)
             def register(self, event: ApplicationReadyEvent) -> None: ...

@@ -90,7 +90,7 @@ class ApplicationEventPublisher:
     def register(self, listeners: Iterable[object]) -> None:
         """Adds the listener methods of `listeners`, like Spring's `addApplicationListener`.
 
-        The start-up registers every `@application_event_listener` here once the container is built. A listener that
+        The start-up registers every component with listener methods here once the container is built. A listener that
         cannot listen raises `InvalidApplicationEventListenerError`, and so does an `@application_module_listener`
         for events the registry cannot keep.
         """

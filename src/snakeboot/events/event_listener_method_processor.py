@@ -4,8 +4,9 @@ from snakeboot.events.application_event_publisher import ApplicationEventPublish
 
 
 class EventListenerMethodProcessor:
-    """Registers every `@application_event_listener` with the publisher once the container is built, like Spring's
-    `EventListenerMethodProcessor` once every singleton exists.
+    """Registers every listener with the publisher once the container is built, like Spring's
+    `EventListenerMethodProcessor` once every singleton exists: the `@application_event_listener`s wireup collects, and
+    the other components with listener methods that the start-up `include`s.
 
     The publisher depends on no listener, so a listener may inject any component, a use case that publishes events
     included: wireup builds the listeners, with what they depend on, to build this processor instead. The application
@@ -22,6 +23,10 @@ class EventListenerMethodProcessor:
     def listeners(self) -> list[object]:
         """Every listener it registers."""
         return list(self._listeners)
+
+    def include(self, listeners: Iterable[object]) -> None:
+        """Adds components with listener methods, before `register_listeners`; one it has already is left out."""
+        self._listeners += [listener for listener in listeners if all(listener is not had for had in self._listeners)]
 
     def register_listeners(self) -> None:
         """Hands every listener to the publisher, the first time it is called."""

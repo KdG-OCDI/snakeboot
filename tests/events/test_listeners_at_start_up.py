@@ -20,12 +20,21 @@ from tests.events.sample_contexts.proposals.proposals import (
     ProposalDeadlineMoved,
     ProposalDeadlines,
 )
+from tests.events.sample_listener_on_no_component.listener_on_no_component_application import (
+    ListenerOnNoComponentApplication,
+)
 from tests.events.sample_unbuildable_listener.unbuildable_listener_application import (
     SignedUp,
     UnbuildableListenerApplication,
 )
 from tests.events.sample_unregistered_listener.unregistered_listener_application import (
+    MemberList,
+    SignedOff,
     UnregisteredListenerApplication,
+    WelcomeService,
+)
+from tests.events.sample_unregistered_listener.unregistered_listener_application import (
+    SignedUp as SignedUpOnAService,
 )
 
 DEADLINE = date(2027, 3, 1)
@@ -137,6 +146,27 @@ def test_an_application_without_listeners_starts_and_publishing_tells_nobody() -
     context.close()
 
 
-def test_a_listener_method_on_a_class_that_does_not_declare_it_listens_stops_the_start() -> None:
-    with pytest.raises(InvalidApplicationEventListenerError, match=r"WelcomeService is no @application_event_listener"):
-        ApplicationContext.start(UnregisteredListenerApplication, CONDITIONAL_MODULES)
+def test_a_listener_method_on_a_service_hears_its_events_as_on_any_spring_bean() -> None:
+    context = ApplicationContext.start(UnregisteredListenerApplication, CONDITIONAL_MODULES)
+
+    context.get(ApplicationEventPublisher).publish(SignedUpOnAService("ann"))
+
+    assert context.get(WelcomeService).welcomed == ["ann"]
+    context.close()
+
+
+def test_a_component_with_two_listener_methods_is_registered_once() -> None:
+    context = ApplicationContext.start(UnregisteredListenerApplication, CONDITIONAL_MODULES)
+    publisher = context.get(ApplicationEventPublisher)
+
+    publisher.publish(SignedUpOnAService("ann"))
+    publisher.publish(SignedUpOnAService("bob"))
+    publisher.publish(SignedOff("ann"))
+
+    assert context.get(MemberList).names == ["bob"]
+    context.close()
+
+
+def test_a_listener_method_on_a_class_that_is_no_component_stops_the_start() -> None:
+    with pytest.raises(InvalidApplicationEventListenerError, match=r"Greeter is no component: add @component"):
+        ApplicationContext.start(ListenerOnNoComponentApplication, CONDITIONAL_MODULES)

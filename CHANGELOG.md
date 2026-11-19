@@ -1,7 +1,20 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.18,<0.19`.
+a minor release may break the API: pin `snakeboot>=0.19,<0.20`.
+
+## 0.19.0
+
+- A listener method (`@event_listener`, `@transactional_event_listener`, `@application_module_listener`) works on any
+  component, as Spring finds an `@EventListener` or an `@ApplicationModuleListener` on any bean: `@component` or
+  `@service` on the class is all it takes, as for an `@scheduled` or `@rabbit_listener` method. Before, a listener
+  method on a class without `@application_event_listener` stopped the start. One on a class that is no component still
+  does, now with `add @component`.
+- `@application_event_listener` is no longer needed. It still works, also next to the new way, and goes in a later
+  minor release: replace it with `@component`.
+- The documentation compares `TestApplication.client()` with `MockMvc`, which it resembles (the application in the
+  test's process, without a server), not with `TestRestTemplate`, which `Autowired[LocalServer]` resembles. Its
+  example `FixedClock` takes no `now`: it stands still at a fixed moment until a test moves it on.
 
 ## 0.18.0
 

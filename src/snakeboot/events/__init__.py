@@ -1,6 +1,6 @@
 """Technical library: in-process application events, like Spring's `ApplicationEventPublisher`.
 
-    @application_event_listener                                    # a @Component with listener methods
+    @component                                    # a @Component with listener methods
     class ParticipantNotificationListener:
         def __init__(self, notifications: NotificationPort) -> None:   # constructor injection
             self._notifications = notifications

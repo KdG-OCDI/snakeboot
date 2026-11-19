@@ -52,7 +52,7 @@ applications. The one library an application does share with snakeboot is Pydant
 | `@externalized("exchange::key")` | Spring Modulith's `@Externalized`, event externalization for AMQP | `snakeboot[rabbitmq]`; `snakeboot[data]` for the outbox |
 | `@rabbit_stream_listener`, `StreamOffsets` | a RabbitMQ stream consumer, like a Kafka consumer with committed offsets | `snakeboot[rabbitmq]`; `snakeboot[data]` for the offsets |
 | `@openapi_definition` | springdoc's `@OpenAPIDefinition` | nothing |
-| `@application_test`, `Autowired`, `@test_component`, `TestApplication` | `@SpringBootTest`, `@Autowired`, `@TestComponent` with `@Primary`, `@AutoConfigureTestDatabase`, `TestRestTemplate` | `snakeboot[testing]` |
+| `@application_test`, `Autowired`, `@test_component`, `TestApplication` | `@SpringBootTest`, `@Autowired`, `@TestComponent` with `@Primary`, `@AutoConfigureTestDatabase`, `MockMvc` | `snakeboot[testing]` |
 | `MockComponent`, `SpyComponent`, `when`, `verify` | `@MockitoBean`, `@MockitoSpyBean`, Mockito's `when` and `verify` | `snakeboot[testing]` |
 | `signed_in_as`, `RecordingTransactionManager`, `declared_classes` | spring-security-test's `jwt()`, spring-test | `snakeboot[testing]` |
 | `PublishedEvents`, `InProcessRabbitTemplate` | Spring's `ApplicationEvents`, Spring Modulith's `PublishedEvents`, Spring AMQP's `TestRabbitTemplate` | `snakeboot[testing]` |
@@ -467,7 +467,7 @@ publication is kept until it succeeds.
 reaches anyone, and a failing listener cannot undo a committed one.
 
 ```python
-@application_event_listener
+@component
 class ParticipantNotificationListener:
     def __init__(self, notifications: NotificationPort) -> None:
         self._notifications = notifications
@@ -487,13 +487,14 @@ the transaction: its writes commit with it, its failure rolls it back), `AFTER_R
 def report_failed_order(self, event: OrderPlaced) -> None: ...
 ```
 
-The class declares that it listens, with `@application_event_listener`. Spring finds an `@EventListener` on any bean;
-here a listener method on a class without that declaration (a `@service`, say) stops the start, since nobody would
-register it. A listener method returns None: Spring publishes what a synchronous listener returns as a next event,
-snakeboot refuses a listener that declares a return type, so a follow-up event is published explicitly:
+A listener method sits on any component, as Spring finds an `@EventListener` on any bean: `@component` or `@service` on
+the class is all it takes, and one on a class that is no component stops the start, since nobody would build it. The
+older `@application_event_listener` on the class still works, and goes in a later minor release. A listener method
+returns None: Spring publishes what a synchronous listener returns as a next event, snakeboot refuses a listener that
+declares a return type, so a follow-up event is published explicitly:
 
 ```python
-@application_event_listener
+@component
 class InvoiceOnOrderPlaced:
     def __init__(self, events: ApplicationEventPublisher) -> None:
         self._events = events
@@ -531,7 +532,7 @@ max_attempts = 10        # then the publication waits in the table for a person
 ```
 
 ```python
-@application_event_listener
+@component
 class InvoiceOnOrderPlaced:
     @application_module_listener(OrderPlaced)
     def create_invoice(self, event: OrderPlaced) -> None: ...
@@ -698,7 +699,7 @@ belongs in a `Lifecycle` component, which `serve` and `run_lifecycle` start, or 
 `ApplicationReadyEvent`:
 
 ```python
-@application_event_listener
+@component
 class WarmUpCache:
     @event_listener(ApplicationReadyEvent)
     def warm_up(self, event: ApplicationReadyEvent) -> None: ...  # at every start of the server
@@ -890,7 +891,9 @@ is marked `@dirties_application`, like `@DirtiesContext`, and the next test star
 # tests/doubles/fixed_clock.py
 @test_component(replaces=ClockPort)  # found in the source; built anew for every test
 class FixedClock(ClockPort):
-    def __init__(self, now: datetime = NOW) -> None: ...
+    def __init__(self) -> None:
+        self._time = FIXED_TIME  # stands still until a test moves it on
+
     def advance(self, duration: timedelta) -> None: ...
 
 
@@ -1080,7 +1083,7 @@ with `@AutoConfigureTestDatabase`, with that infrastructure: `overrides` replace
 `SPY` wrap them in a spy before anything that depends on them is built (`overrides={PaymentPort: SPY}`, what a
 `SpyComponent` does), `environment=TestEnvironment(profile=..., properties=..., database=...)` says where it runs and
 `only=WebSlice()` or `only=ModuleSlice(("...",))` how much of it. `client()` calls the REST API in the same process,
-like `TestRestTemplate`; used as a context manager, the lifecycle runs around it. A test may use it directly:
+without a server, like `MockMvc`; used as a context manager, the lifecycle runs around it. A test may use it directly:
 
 ```python
 def test_a_started_game_can_be_read() -> None:

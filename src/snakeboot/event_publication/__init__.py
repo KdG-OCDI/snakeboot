@@ -1,6 +1,6 @@
 """Technical library: the event publication registry in the application's database, like Spring Modulith's.
 
-    @application_event_listener
+    @component
     class InvoiceOnOrderPlaced:
         @application_module_listener(OrderPlaced)        # own thread, own transaction, at least once
         def create_invoice(self, event: OrderPlaced) -> None: ...
