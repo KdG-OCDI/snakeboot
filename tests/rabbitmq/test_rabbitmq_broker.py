@@ -1,5 +1,5 @@
-"""On RabbitMQ: a message refused for good ends in the dead-letter queue, a queue that exists keeps its arguments, and
-a long pause between two attempts keeps the connection.
+"""On RabbitMQ: a message refused for good ends in the dead-letter queue, a queue that exists keeps its arguments, a
+long pause between two attempts keeps the connection, and so does a method that handles a message for a long time.
 
 Set SNAKEBOOT_TEST_RABBITMQ_URL to a broker on which these tests may declare and delete the queues of the sample
 listeners and the exchange `games`, such as `docker run -p 55672:5672 rabbitmq:4-management`:
@@ -136,3 +136,28 @@ def test_a_long_pause_between_two_attempts_keeps_the_connection(channel: Any) ->
 
     left = channel.queue_declare(STARTED_QUEUE, durable=True, passive=True).method.message_count
     assert (listener.attempts["flaky"], len(listener.started), left) == (2, 1, 0)
+
+
+def test_a_method_that_takes_longer_than_the_heartbeat_timeout_keeps_the_connection(channel: Any) -> None:
+    slow_seconds = 6
+    listener = GameStartedListener(slow_seconds=slow_seconds)
+    timing = ListenerTiming(reconnect_seconds=0.1, retry_pause_seconds=0, poll_seconds=0.5, shutdown_seconds=10)
+    # A heartbeat of a second: without answers meanwhile, the broker closes the connection within a few seconds and
+    # hands the message to the next consumer, so it would be handled twice.
+    containers = RabbitListenerContainers(
+        ScannedComponents(WORKING, listener),
+        CountingTaskDecorator(),
+        connection_factory(heartbeat=1),
+        auto_startup=True,
+        timing=timing,
+    )
+    containers.start()
+    try:
+        channel.basic_publish("games", "game.tictactoe.started", b'{"session_id": "slow", "player_ids": []}')
+        assert listener.received.wait(WAIT_SECONDS + slow_seconds)
+        channel.connection.sleep(2)  # time for the acknowledgement, or for a delivery to another consumer
+    finally:
+        containers.stop()
+
+    left = channel.queue_declare(STARTED_QUEUE, durable=True, passive=True).method.message_count
+    assert (listener.attempts["slow"], len(listener.started), left) == (1, 1, 0)

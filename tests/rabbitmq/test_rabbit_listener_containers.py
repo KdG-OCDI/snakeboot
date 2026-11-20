@@ -202,6 +202,25 @@ def test_a_failing_message_is_tried_as_often_as_the_timing_says_while_the_connec
     assert sum(broker.slept) == pytest.approx(0.55, abs=0.05)
 
 
+def test_a_method_that_takes_long_lets_the_connection_answer_the_broker_meanwhile(
+    broker: FakeBroker, decorator: CountingTaskDecorator
+) -> None:
+    listener = GameStartedListener(slow_seconds=0.3)
+    containers = RabbitListenerContainers(
+        ScannedComponents(WORKING, listener), decorator, connection_factory_of(broker), auto_startup=True, timing=QUICK
+    )
+    containers.start()
+    try:
+        broker.deliver(QUEUE, b'{"session_id": "slow", "player_ids": []}')
+        settled(broker)
+    finally:
+        containers.stop()
+
+    assert (listener.attempts["slow"], broker.acked) == (1, [1])
+    assert broker.slept  # the connection answered the broker in slices while the method worked
+    assert set(broker.slept) == {0}
+
+
 @pytest.fixture
 def dead_letter_listener() -> GameFinishedListener:
     return GameFinishedListener()

@@ -751,7 +751,10 @@ that is down, is tried again as `[rabbitmq.listener.retry]` says, like `spring.r
 has `dead_letter=True`: then it moves to the durable queue `<queue>.dead-letter`, as Spring's
 `RejectAndDontRequeueRecoverer` does with a queue's `x-dead-letter-exchange`, to be looked at or moved back by hand,
 with RabbitMQ's `x-death` header saying where and why. The `RabbitTemplate` sends persistent JSON, confirmed by the
-broker. `[rabbitmq.listener] auto_startup = false` keeps a process from consuming.
+broker. `[rabbitmq.listener] auto_startup = false` keeps a process from consuming. `routing_key` may be a tuple, as
+`@QueueBinding(key = {...})` takes several keys: the queue is bound once for each, and the one method takes whatever
+any of them matches, telling the messages apart by their body. A key left out later stays bound, as with Spring's
+`RabbitAdmin`, which only adds: unbind it on the broker.
 
 ```python
 @component
@@ -773,8 +776,12 @@ multiplier = 2
 max_interval = 30
 ```
 
-The listener holds the message while it waits (prefetch 1), so the messages behind it wait too, and its connection
-keeps answering the broker's heartbeats. Before any listener consumes, the start-up declares every exchange, queue
+The listener holds the message while the method works on it and while it waits between two attempts (prefetch 1),
+so the messages behind it wait too, and its connection keeps answering the broker's heartbeats all the while: the
+method runs on a thread of its own, with the listener's trace, while the listener's thread answers the broker. So a
+method may take minutes, as one that waits for a language model does, without RabbitMQ closing the connection and
+handing the message to another consumer meanwhile. RabbitMQ's own `consumer_timeout` (30 minutes by default) still
+holds: a method that may take longer needs a longer one on the broker. Before any listener consumes, the start-up declares every exchange, queue
 and binding, and a declaration RabbitMQ refuses stops it (`AmqpDeclarationError`). RabbitMQ does not change the
 arguments of a queue that exists, so turning `dead_letter` on, or off, for a queue that is there already stops the
 start-up with RabbitMQ's `PRECONDITION_FAILED` and two ways to migrate the queue:
@@ -815,7 +822,8 @@ The start-up declares the exchange, the stream (a durable queue of type `stream`
 already, with a retention of its own (`x-max-age`), is taken as it is. A stream keeps only what reached it: declare it
 before the events it needs (start the consumer once, or put it in RabbitMQ's definitions), and limit it with a policy
 or an argument (`max-age`, `max-length-bytes`) or it is kept for ever. Several services may read one stream: it holds
-what the bindings of all of them route to it, and each method handles only what its own routing key matches.
+what the bindings of all of them route to it, and each method handles only what its own routing keys match (one, or
+a tuple of several, each bound to the stream).
 `RejectAndDontRequeueError`, or a body that cannot be converted, skips a message for good. Another failure is tried
 again as `[rabbitmq.listener.retry]` says; then the method stops reading and reads on from the same message after a
 while, so a projection never misses one. When RabbitMQ stops a method reading, as when the stream is deleted, it
@@ -1127,7 +1135,7 @@ docker run -d --rm -p 55432:5432 -e POSTGRES_PASSWORD=snakeboot pgvector/pgvecto
 SNAKEBOOT_TEST_POSTGRESQL_URL=postgresql+psycopg://postgres:snakeboot@localhost:55432/postgres uv run pytest
 ```
 
-The RabbitMQ tests (dead letters, queue arguments, heartbeats during a back-off) run when `SNAKEBOOT_TEST_RABBITMQ_URL`
+The RabbitMQ tests (dead letters, queue arguments, heartbeats during a back-off and during a long handling) run when `SNAKEBOOT_TEST_RABBITMQ_URL`
 names a broker on which they may declare and delete queues:
 
 ```bash

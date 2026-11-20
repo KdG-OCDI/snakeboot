@@ -56,8 +56,10 @@ class RabbitListenerContainers(Lifecycle, component=False):
     A message whose handling fails is tried again, `attempts` times in all, with a pause that grows by
     `retry_multiplier` after each failure, then refused for good, as Spring Boot does with `retry.enabled`: handed
     back to the queue instead, it would come back first, again and again, and hold up every message behind it.
-    RabbitMQ then moves it to the listener's dead-letter queue, or drops it when there is none. During a pause the
-    connection keeps answering the broker's heartbeats, so a long back-off does not lose it.
+    RabbitMQ then moves it to the listener's dead-letter queue, or drops it when there is none. While the method
+    handles a message, and during a pause, the connection keeps answering the broker's heartbeats, so neither a
+    method that takes minutes nor a long back-off loses it, and RabbitMQ hands the message to no other consumer
+    meanwhile.
 
     `snakeboot.rabbitmq.rabbitmq_injectable` registers it with wireup; tests build it with a stand-in for the broker.
     """

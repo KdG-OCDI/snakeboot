@@ -1,6 +1,7 @@
 """A listener that takes a pydantic model, refuses some messages and fails on others."""
 
 import threading
+import time
 
 from pydantic import BaseModel
 
@@ -18,7 +19,8 @@ class GameStarted(BaseModel):
 class GameStartedListener:
     """Stands in for an inbound adapter: remembers every game it was told to start."""
 
-    def __init__(self) -> None:
+    def __init__(self, *, slow_seconds: float = 0) -> None:
+        self.slow_seconds = slow_seconds
         self.started: list[GameStarted] = []
         self.traces: list[str | None] = []
         self.attempts: dict[str, int] = {}
@@ -27,7 +29,7 @@ class GameStartedListener:
     @rabbit_listener(queue="tictactoe.game-started", exchange="games", routing_key="game.tictactoe.started")
     def on_game_started(self, message: GameStarted) -> None:
         """Starts a game. A session `refuse` breaks the rules, `crash` always meets a database that is down,
-        `flaky` only the first time."""
+        `flaky` only the first time, and `slow` takes `slow_seconds`, as a call to a language model does."""
         attempt = self.attempts[message.session_id] = self.attempts.get(message.session_id, 0) + 1
         if message.session_id == "flaky" and attempt == 1:
             raise RuntimeError("the database was down for a moment")
@@ -35,6 +37,8 @@ class GameStartedListener:
             raise RejectAndDontRequeueError("this game breaks the rules")
         if message.session_id == "crash":
             raise RuntimeError("the database is down")
+        if message.session_id == "slow":
+            time.sleep(self.slow_seconds)
         span = TraceContext.current()
         self.traces.append(span.trace_id if span is not None else None)
         self.started.append(message)

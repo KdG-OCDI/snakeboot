@@ -24,7 +24,7 @@ class AmqpDeclarationError(RuntimeError):
 
 
 def declare_listener_queue(channel: Any, listener: str, mapping: RabbitListenerMapping) -> None:
-    """Declares the durable topic exchange, the dead-letter queue (if any), the durable queue and its binding.
+    """Declares the durable topic exchange, the dead-letter queue (if any), the durable queue and its bindings.
 
     Raises AmqpDeclarationError, naming `listener`, when RabbitMQ refuses one; RabbitMQ then closed the channel.
     """
@@ -35,7 +35,7 @@ def declare_listener_queue(channel: Any, listener: str, mapping: RabbitListenerM
 
 
 def declare_listener_stream(connection: Any, listener: str, mapping: RabbitStreamListenerMapping) -> Any:
-    """Declares the durable topic exchange, the stream (a durable queue of type `stream`) and its binding, on a
+    """Declares the durable topic exchange, the stream (a durable queue of type `stream`) and its bindings, on a
     channel of `connection`, and returns the channel to read from.
 
     A stream that exists keeps the arguments it was declared with, such as a retention (`x-max-age`) set in
@@ -51,7 +51,8 @@ def declare_listener_stream(connection: Any, listener: str, mapping: RabbitStrea
             raise AmqpDeclarationError(_stream_refusal(listener, mapping, error)) from error
         channel = connection.channel()  # RabbitMQ closed the other; the stream is there, with arguments of its own
     try:
-        channel.queue_bind(queue=mapping.stream, exchange=mapping.exchange, routing_key=mapping.routing_key)
+        for routing_key in mapping.routing_keys:
+            channel.queue_bind(queue=mapping.stream, exchange=mapping.exchange, routing_key=routing_key)
     except ChannelClosedByBroker as error:
         raise AmqpDeclarationError(_stream_refusal(listener, mapping, error)) from error
     return channel
@@ -75,7 +76,8 @@ def _declare(channel: Any, mapping: RabbitListenerMapping) -> None:
         channel.queue_declare(queue=mapping.dead_letter_queue, durable=True)
         dead_lettering = {"x-dead-letter-exchange": "", "x-dead-letter-routing-key": mapping.dead_letter_queue}
     channel.queue_declare(queue=mapping.queue, durable=True, arguments=dead_lettering)
-    channel.queue_bind(queue=mapping.queue, exchange=mapping.exchange, routing_key=mapping.routing_key)
+    for routing_key in mapping.routing_keys:
+        channel.queue_bind(queue=mapping.queue, exchange=mapping.exchange, routing_key=routing_key)
 
 
 def _refusal(listener: str, mapping: RabbitListenerMapping, error: ChannelClosedByBroker) -> str:

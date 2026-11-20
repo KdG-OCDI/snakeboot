@@ -17,7 +17,6 @@ from snakeboot.rabbitmq.rabbit_stream_listener_containers import (
     stream_offsets_of,
 )
 from snakeboot.rabbitmq.rabbit_template import RabbitTemplate
-from snakeboot.rabbitmq.topic_routing import routes
 from snakeboot.transaction import TransactionManagerRegistry, after_commit
 
 logger = logging.getLogger(__name__)
@@ -115,7 +114,7 @@ class InProcessRabbitTemplate(RabbitTemplate):
         by_queue: dict[str, RabbitListenerEndpoint] = {}
         for endpoint in self._listeners():
             bound = endpoint.mapping.exchange == message.exchange
-            if bound and routes(endpoint.mapping.routing_key, message.routing_key):
+            if bound and endpoint.mapping.matches(message.routing_key):
                 by_queue.setdefault(endpoint.mapping.queue, endpoint)
         for endpoint in by_queue.values():
             try:
@@ -131,7 +130,7 @@ class InProcessRabbitTemplate(RabbitTemplate):
             if endpoint.mapping.exchange == message.exchange:
                 by_stream.setdefault(endpoint.mapping.stream, []).append(endpoint)
         for stream, endpoints in by_stream.items():
-            if any(routes(endpoint.mapping.routing_key, message.routing_key) for endpoint in endpoints):
+            if any(endpoint.mapping.matches(message.routing_key) for endpoint in endpoints):
                 with self._lock:
                     offset = self._stream_lengths.get(stream, 0)
                     self._stream_lengths[stream] = offset + 1
@@ -139,7 +138,7 @@ class InProcessRabbitTemplate(RabbitTemplate):
                     self._read_from_stream(endpoint, message, offset)
 
     def _read_from_stream(self, endpoint: RabbitStreamListenerEndpoint, message: SentMessage, offset: int) -> None:
-        if endpoint.name in self._stalled or not routes(endpoint.mapping.routing_key, message.routing_key):
+        if endpoint.name in self._stalled or not endpoint.mapping.matches(message.routing_key):
             return
         event = StreamEvent.of(offset, message.body, message.message_id)
         generation = self._generation_to_read_in(endpoint, event)

@@ -1,7 +1,20 @@
 # Changelog
 
 snakeboot follows [semantic versioning](https://semver.org/). While the version starts with `0.`,
-a minor release may break the API: pin `snakeboot>=0.19,<0.20`.
+a minor release may break the API: pin `snakeboot>=0.20,<0.21`.
+
+## 0.20.0
+
+- `@rabbit_listener(routing_key=...)` and `@rabbit_stream_listener(routing_key=...)` take a tuple of routing keys as
+  well, like `@QueueBinding(key = {...})`: the queue or stream is bound once for each key, and the method takes what
+  any of them matches. An empty tuple stops the start. **Breaking:** `RabbitListenerMapping` and
+  `RabbitStreamListenerMapping` hold `routing_keys`, a tuple, instead of `routing_key`; `matches(routing_key)` tells
+  whether a message sent with that key reaches the method.
+- A listener's connection keeps answering the broker's heartbeats while the method works on a message, not only
+  between two attempts: the method runs on a thread of its own, with the context of the listener's thread (its
+  trace), while the listener's thread answers the broker. Before, a method that took longer than the heartbeat
+  timeout, such as one that waits minutes for a language model, lost the connection, and RabbitMQ handed the message
+  to another consumer while the first still worked on it: handled twice. This holds for queue and stream listeners.
 
 ## 0.19.0
 

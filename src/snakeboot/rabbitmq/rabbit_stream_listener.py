@@ -1,22 +1,29 @@
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
 
 from snakeboot.events.stream_offsets import STREAM_CONSUMER_ATTRIBUTE
+from snakeboot.rabbitmq.rabbit_listener import binding_keys
+from snakeboot.rabbitmq.topic_routing import routes
 
 type MethodMarker = Callable[[Callable[..., Any]], Callable[..., Any]]
 
 
 @dataclass(frozen=True, slots=True)
 class RabbitStreamListenerMapping:
-    """Where a `@rabbit_stream_listener` method reads from: a RabbitMQ stream, bound to a topic exchange."""
+    """Where a `@rabbit_stream_listener` method reads from: a RabbitMQ stream, bound to a topic exchange with one
+    routing key or more."""
 
     stream: str
     exchange: str
-    routing_key: str
+    routing_keys: tuple[str, ...]
+
+    def matches(self, routing_key: str) -> bool:
+        """Tells whether the method handles a message sent with `routing_key`: one of its routing keys matches it."""
+        return any(routes(binding_key, routing_key) for binding_key in self.routing_keys)
 
 
-def rabbit_stream_listener(*, stream: str, exchange: str, routing_key: str) -> MethodMarker:
+def rabbit_stream_listener(*, stream: str, exchange: str, routing_key: str | Sequence[str]) -> MethodMarker:
     """Makes a method of a component read a RabbitMQ stream: every message in it, from the first one on.
 
     A queue forgets a message once a listener took it; a stream keeps every message, like a Kafka topic, and each
@@ -38,7 +45,8 @@ def rabbit_stream_listener(*, stream: str, exchange: str, routing_key: str) -> M
     handling one twice, and of the processes of the service that all read the stream, one handles each message.
     Without a database the offset lives in memory, and the method reads the stream from the start again at every
     start, building its projection in memory anew. The offset belongs to the method, by its name
-    `module.Class.method`: renaming it reads the stream from the start again.
+    `module.Class.method`: renaming it reads the stream from the start again. `routing_key` may be a tuple, as for a
+    `@rabbit_listener`: the stream is bound once for each key, and the method handles what any of them matches.
 
     A stream only keeps what reached it: what the exchange routed before the stream was declared is lost. So start
     the consumer once before the events it needs, or declare the stream with RabbitMQ's definitions. RabbitMQ keeps a
@@ -57,7 +65,11 @@ def rabbit_stream_listener(*, stream: str, exchange: str, routing_key: str) -> M
     such as a database that is down, is tried again as `[rabbitmq.listener.retry]` says; then the method stops reading
     and reads on from the same message after a while, so its projection never misses one.
     """
-    mapping = RabbitStreamListenerMapping(stream=stream, exchange=exchange, routing_key=routing_key)
+    mapping = RabbitStreamListenerMapping(
+        stream=stream,
+        exchange=exchange,
+        routing_keys=binding_keys(routing_key, f"@rabbit_stream_listener(stream={stream!r})"),
+    )
 
     def mark(method: Callable[..., Any]) -> Callable[..., Any]:
         setattr(method, STREAM_CONSUMER_ATTRIBUTE, mapping)

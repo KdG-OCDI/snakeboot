@@ -25,7 +25,6 @@ from snakeboot.rabbitmq.message_attempts import Attempted, MessageAttempts
 from snakeboot.rabbitmq.rabbit_connection_factory import RabbitConnectionFactory
 from snakeboot.rabbitmq.rabbit_listener_containers import BoundListener, bound_listener, close_quietly
 from snakeboot.rabbitmq.rabbit_stream_listener import RabbitStreamListenerMapping
-from snakeboot.rabbitmq.topic_routing import routes
 from snakeboot.tracing import TRACEPARENT, TraceContext
 from snakeboot.transaction import TransactionManagerRegistry
 
@@ -309,7 +308,7 @@ class _StreamReader:
             if not self._stalled:
                 channel.basic_ack(delivery_tag=delivery.delivery_tag)
             return
-        if not routes(self._endpoint.mapping.routing_key, delivery.routing_key):
+        if not self._endpoint.mapping.matches(delivery.routing_key):
             channel.basic_ack(delivery_tag=delivery.delivery_tag)  # the binding of another listener put it there
             return
         with TraceContext.started(traceparent if isinstance(traceparent, str) else None):
